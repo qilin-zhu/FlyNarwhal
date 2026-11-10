@@ -125,7 +125,7 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
   }
 
   Future<void> _loadFolderInfo() async {
-    final dataSource = ref.read(mediaRemoteDataSourceProvider);
+    final dataSource = ref.read(mediaBackendProvider);
     try {
       final result = await dataSource.getItemDetail(widget.guid);
       final info = result.dataOrNull;
@@ -258,6 +258,10 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
   }
 
   Future<void> _loadFolderSettings() async {
+    // The per-folder view/sort blob lives in fnOS user data; Emby-family
+    // servers have no equivalent, so keep local defaults instead of firing a
+    // request that can only 404.
+    if (!ref.read(backendCapabilitiesProvider).perUserSync) return;
     final dataSource = ref.read(userRemoteDataSourceProvider);
     try {
       final result = await dataSource.getUserData(UserDataGetRequest(
@@ -293,6 +297,10 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
       await _refreshBrowse();
       return;
     }
+    if (!ref.read(backendCapabilitiesProvider).perUserSync) {
+      await _refreshBrowse();
+      return;
+    }
     final dataSource = ref.read(userRemoteDataSourceProvider);
     try {
       await dataSource.setUserData(UserDataSetRequest(
@@ -310,7 +318,7 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
     if (!mounted) return;
     // _loadFolderInfo reads through the data source's detail cache, which
     // outlives this page; drop it so a refresh shows fresh folder state.
-    ref.read(mediaRemoteDataSourceProvider).invalidateDetailCache(widget.guid);
+    ref.read(mediaBackendProvider).invalidateDetailCache(widget.guid);
     setState(() {
       _isFilterOpen = false;
       _selectedFilters = {};
@@ -466,7 +474,7 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
   Future<void> _rescrap() async {
     final l10n = AppLocalizations.of(context);
     setState(() => _moreActionLoading = true);
-    final dataSource = ref.read(mediaRemoteDataSourceProvider);
+    final dataSource = ref.read(mediaBackendProvider);
     try {
       final result = await dataSource.rescrapItem(
           widget.guid, MediaType.directory.value);
@@ -490,7 +498,7 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
   Future<void> _refreshMetadata() async {
     final l10n = AppLocalizations.of(context);
     setState(() => _moreActionLoading = true);
-    final dataSource = ref.read(mediaRemoteDataSourceProvider);
+    final dataSource = ref.read(mediaBackendProvider);
     try {
       final result = await dataSource.refreshItemMetadata(widget.guid);
       final ok = result.isSuccess && result.dataOrNull == true;
@@ -546,7 +554,7 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
     );
     if (confirmed != true) return;
     setState(() => _moreActionLoading = true);
-    final dataSource = ref.read(mediaRemoteDataSourceProvider);
+    final dataSource = ref.read(mediaBackendProvider);
     try {
       final result =
           await dataSource.deleteItem(widget.guid, deleteFile: false);

@@ -88,7 +88,7 @@ class MediaPViewModel extends StateNotifier<MediaPState> {
       MediaPRequest request) async {
     _setLoading(true);
     try {
-      final remote = ref.read(mediaRemoteDataSourceProvider);
+      final remote = ref.read(mediaBackendProvider);
       final response = await remote.fetchTranscodeStatus(
         _withReq(
           request,
@@ -112,7 +112,7 @@ class MediaPViewModel extends StateNotifier<MediaPState> {
   Future<MediaResetQualityResponse> resetQuality(MediaPRequest request) async {
     _setLoading(true);
     try {
-      final remote = ref.read(mediaRemoteDataSourceProvider);
+      final remote = ref.read(mediaBackendProvider);
       final response = await remote.resetQuality(
         _withReq(
           request,
@@ -136,7 +136,7 @@ class MediaPViewModel extends StateNotifier<MediaPState> {
   Future<MediaResetQualityResponse> resetAudio(MediaPRequest request) async {
     _setLoading(true);
     try {
-      final remote = ref.read(mediaRemoteDataSourceProvider);
+      final remote = ref.read(mediaBackendProvider);
       final response = await remote.resetAudio(
         _withReq(
           request,
@@ -160,7 +160,7 @@ class MediaPViewModel extends StateNotifier<MediaPState> {
   Future<MediaResetQualityResponse> resetSubtitle(MediaPRequest request) async {
     _setLoading(true);
     try {
-      final remote = ref.read(mediaRemoteDataSourceProvider);
+      final remote = ref.read(mediaBackendProvider);
       final response = await remote.resetSubtitle(
         _withReq(
           request,
@@ -192,7 +192,7 @@ class MediaPViewModel extends StateNotifier<MediaPState> {
     }
 
     try {
-      final remote = ref.read(mediaRemoteDataSourceProvider);
+      final remote = ref.read(mediaBackendProvider);
       final response = await remote.quit(
         _withReq(
           request,

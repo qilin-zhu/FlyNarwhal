@@ -4,6 +4,7 @@ import 'dart:ui' show Locale, PlatformDispatcher;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../ui/settings/app_language.dart';
+import '../backends/media_server_kind.dart';
 import '../models/login_history.dart';
 
 class PreferencesManager {
@@ -30,6 +31,13 @@ class PreferencesManager {
   static const String _keySkipCommercial = 'skip_commercial';
   // 播放详细信息面板样式：true = 带动画的液态玻璃面板，false = 静态毛玻璃面板。
   static const String _keyPlayerDetailsLiquidGlass = 'player_details_liquid_glass';
+  // 当前登录的服务端类型：'fnos' | 'emby' | 'jellyfin'。未写入时视为 fnos，
+  // 这样老版本升级上来的安装无需迁移。
+  static const String _keyServerKind = 'media_server_kind';
+  // Emby family 的 access token 单独存放：它与 fnOS 的 Trim-MC-token 语义不同，
+  // 混在 _keyToken 里会让 DioClient 的 Authx 签名逻辑拿到错误的凭据。
+  static const String _keyEmbyAccessToken = 'emby_access_token';
+  static const String _keyEmbyUserId = 'emby_user_id';
 
   final SharedPreferences _prefs;
 
@@ -192,6 +200,35 @@ class PreferencesManager {
     await _prefs.setString(_keyFallbackDeviceId, value);
   }
 
+  /// Which server family the stored session belongs to. Defaults to fnOS so
+  /// installs created before this key existed keep working unchanged.
+  MediaServerKind getServerKind() {
+    return MediaServerKind.fromValue(_prefs.getString(_keyServerKind));
+  }
+
+  Future<void> saveServerKind(MediaServerKind kind) async {
+    await _prefs.setString(_keyServerKind, kind.value);
+  }
+
+  String? getEmbyAccessToken() {
+    return _prefs.getString(_keyEmbyAccessToken);
+  }
+
+  String? getEmbyUserId() {
+    return _prefs.getString(_keyEmbyUserId);
+  }
+
+  /// Persist the Emby session. `baseUrl` reuses the fnOS key because both
+  /// backends treat it as "the server this install talks to", and the login
+  /// screen shows exactly one server address at a time.
+  Future<void> saveEmbySession({
+    required String accessToken,
+    required String userId,
+  }) async {
+    await _prefs.setString(_keyEmbyAccessToken, accessToken);
+    await _prefs.setString(_keyEmbyUserId, userId);
+  }
+
   bool? getSmartSkipEnabledForUser(String userGuid) {
     final normalizedUserGuid = userGuid.trim();
     if (normalizedUserGuid.isEmpty) return null;
@@ -308,5 +345,8 @@ class PreferencesManager {
     await _prefs.remove(_keyToken);
     await _prefs.remove(_keyBaseUrl);
     await _prefs.remove(_keyCookie);
+    await _prefs.remove(_keyEmbyAccessToken);
+    await _prefs.remove(_keyEmbyUserId);
+    await _prefs.remove(_keyServerKind);
   }
 }

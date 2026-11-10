@@ -20,6 +20,9 @@ LoginHistory _$LoginHistoryFromJson(Map<String, dynamic> json) => LoginHistory(
       lastLoginTimestamp: (json['lastLoginTimestamp'] as num?)?.toInt(),
       displayHost: json['displayHost'] as String? ?? "",
       displayPort: (json['displayPort'] as num?)?.toInt(),
+      serverKind: $enumDecodeNullable(
+              _$MediaServerKindEnumMap, json['serverKind']) ??
+          MediaServerKind.fnos,
     );
 
 Map<String, dynamic> _$LoginHistoryToJson(LoginHistory instance) =>
@@ -37,4 +40,11 @@ Map<String, dynamic> _$LoginHistoryToJson(LoginHistory instance) =>
       'lastLoginTimestamp': instance.lastLoginTimestamp,
       'displayHost': instance.displayHost,
       'displayPort': instance.displayPort,
+      'serverKind': _$MediaServerKindEnumMap[instance.serverKind]!,
     };
+
+const _$MediaServerKindEnumMap = <MediaServerKind, String>{
+  MediaServerKind.fnos: 'fnos',
+  MediaServerKind.emby: 'emby',
+  MediaServerKind.jellyfin: 'jellyfin',
+};

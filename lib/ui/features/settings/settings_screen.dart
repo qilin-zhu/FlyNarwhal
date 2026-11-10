@@ -639,14 +639,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                   );
                                   if (confirmed != true || !mounted) return;
 
-                                  final dataSource =
-                                      ref.read(userRemoteDataSourceProvider);
-                                  unawaited(
-                                    dataSource.logout().then(
-                                          (_) {},
-                                          onError: (_) {},
-                                        ),
-                                  );
+                                  // fnOS keeps a server-side session that has to
+                                  // be revoked explicitly; Emby-family servers
+                                  // simply stop honouring the stored token, so
+                                  // calling the fnOS endpoint there would only
+                                  // produce a 404.
+                                  if (ref.read(serverKindProvider).isFnos) {
+                                    final dataSource = ref.read(
+                                      userRemoteDataSourceProvider,
+                                    );
+                                    unawaited(
+                                      dataSource.logout().then(
+                                            (_) {},
+                                            onError: (_) {},
+                                          ),
+                                    );
+                                  }
 
                                   await ref
                                       .read(sessionStateControllerProvider)

@@ -22,7 +22,7 @@ class MediaDbListNotifier extends _$MediaDbListNotifier {
 
   @override
   FutureOr<List<MediaDbListResponse>> build() async {
-    final remote = ref.read(mediaRemoteDataSourceProvider);
+    final remote = ref.read(mediaBackendProvider);
     for (var attempt = 0;; attempt++) {
       try {
         return (await remote.getMediaDbList()).getOrThrow();
@@ -40,7 +40,7 @@ class MediaDbListNotifier extends _$MediaDbListNotifier {
 class MediaSumNotifier extends _$MediaSumNotifier {
   @override
   FutureOr<Map<String, int>> build() async {
-    final remote = ref.read(mediaRemoteDataSourceProvider);
+    final remote = ref.read(mediaBackendProvider);
     return (await remote.getMediaSum()).getOrThrow();
   }
 }
@@ -49,7 +49,7 @@ class MediaSumNotifier extends _$MediaSumNotifier {
 class PlayListNotifier extends _$PlayListNotifier {
   @override
   FutureOr<List<PlayDetailResponse>> build() async {
-    final remote = ref.read(mediaRemoteDataSourceProvider);
+    final remote = ref.read(mediaBackendProvider);
     return (await remote.getPlayList()).getOrThrow();
   }
 
@@ -67,7 +67,7 @@ class ItemListNotifier extends _$ItemListNotifier {
       ancestorGuid: guid,
       tags: Tags(type: MediaType.libraryBrowseValues),
     );
-    final remote = ref.read(mediaRemoteDataSourceProvider);
+    final remote = ref.read(mediaBackendProvider);
     try {
       final result = (await remote.getItemList(request)).getOrThrow();
       ref.keepAlive();
@@ -122,7 +122,7 @@ class FavoriteNotifier extends _$FavoriteNotifier {
     final l10n = lookupAppLocalizations(AppLanguage.localeFromValue(
         ref.read(settingsProvider).language));
     try {
-      final remote = ref.read(mediaRemoteDataSourceProvider);
+      final remote = ref.read(mediaBackendProvider);
       final response = await remote.toggleFavorite(
         ItemGuidRequest(itemGuid: guid),
         isFavorite: currentFavoriteState,
@@ -171,7 +171,7 @@ class WatchedNotifier extends _$WatchedNotifier {
     final l10n = lookupAppLocalizations(AppLanguage.localeFromValue(
         ref.read(settingsProvider).language));
     try {
-      final remote = ref.read(mediaRemoteDataSourceProvider);
+      final remote = ref.read(mediaBackendProvider);
       final response = await remote.toggleWatched(
         ItemGuidRequest(itemGuid: guid),
         isWatched: currentWatchedState,

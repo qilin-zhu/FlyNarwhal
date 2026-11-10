@@ -430,7 +430,7 @@ class _MoviePosterState extends ConsumerState<MoviePoster>
 
     // 预取详情数据到缓存，使进入详情页时近乎秒开。
     unawaited(ref
-        .read(mediaRemoteDataSourceProvider)
+        .read(mediaBackendProvider)
         .prefetchItemDetail(widget.guid!));
 
     final mediaType = MediaType.tryParse(widget.type);

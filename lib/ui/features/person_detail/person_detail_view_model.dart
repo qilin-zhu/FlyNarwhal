@@ -45,7 +45,7 @@ class PersonNotFoundException implements Exception {
 @riverpod
 class PersonDetailNotifier extends _$PersonDetailNotifier {
   Future<PersonDetailState> _load(String guid) async {
-    final remote = ref.read(mediaRemoteDataSourceProvider);
+    final remote = ref.read(mediaBackendProvider);
 
     Future<List<PersonItemList>> worksByJob(String job) async {
       final result = await remote.getPersonItemList(
@@ -85,7 +85,7 @@ class PersonDetailNotifier extends _$PersonDetailNotifier {
 
   Future<void> refresh() async {
     // Show an explicit loading state while refreshing person details.
-    ref.read(mediaRemoteDataSourceProvider).invalidateDetailCache(guid);
+    ref.read(mediaBackendProvider).invalidateDetailCache(guid);
     state = const AsyncValue.loading();
     state = await AsyncValue.guard(() => _load(guid));
   }

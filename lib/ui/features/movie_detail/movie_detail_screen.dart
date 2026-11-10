@@ -32,30 +32,8 @@ import '../../shared/cast_scroll_row.dart';
 import '../../shared/toast.dart';
 import 'package:fly_narwhal/ui/shared/app_button.dart';
 
-String _buildImageUrl(String baseUrl, String path) {
-  final trimmedPath = path.trim();
-  if (baseUrl.isEmpty || trimmedPath.isEmpty) return '';
-
-  final lowerPath = trimmedPath.toLowerCase();
-  if (lowerPath.startsWith('http://') || lowerPath.startsWith('https://')) {
-    return trimmedPath;
-  }
-
-  final normalizedBaseUrl = baseUrl.endsWith('/')
-      ? baseUrl.substring(0, baseUrl.length - 1)
-      : baseUrl;
-
-  if (trimmedPath.startsWith('/v/api/v1/sys/img')) {
-    return '$normalizedBaseUrl$trimmedPath';
-  }
-  if (trimmedPath.startsWith('v/api/v1/sys/img')) {
-    return '$normalizedBaseUrl/$trimmedPath';
-  }
-
-  final normalizedPath =
-      trimmedPath.startsWith('/') ? trimmedPath : '/$trimmedPath';
-  return '$normalizedBaseUrl/v/api/v1/sys/img$normalizedPath';
-}
+String _buildImageUrl(String baseUrl, String path) =>
+    resolveMediaImageUrl(baseUrl, path);
 
 String _formatAudioTypeLabel(BuildContext context, String audioType) {
   return switch (audioType.trim().toLowerCase()) {
@@ -89,14 +67,9 @@ class MovieDetailScreen extends ConsumerWidget {
     final detailState = ref.watch(movieDetailNotifierProvider(guid));
     final prefsManager = ref.watch(preferencesManagerProvider);
     final baseUrl = prefsManager.getBaseUrl() ?? '';
-    final token = prefsManager.getToken();
-    final cookie = prefsManager.getCookie();
-    final httpHeaders = token != null || (cookie != null && cookie.isNotEmpty)
-        ? {
-            if (token != null) 'Authorization': token,
-            if (cookie != null && cookie.isNotEmpty) 'Cookie': cookie,
-          }
-        : null;
+    // Ask the backend for player/image auth instead of assuming fnOS token +
+    // cookie; an Emby session needs `Authorization: MediaBrowser Token=...`.
+    final httpHeaders = backendImageHeaders(ref);
     final cacheManager = ref.watch(imageCacheManagerProvider);
 
     final theme = FluentTheme.of(context);

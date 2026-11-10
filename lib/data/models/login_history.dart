@@ -1,5 +1,7 @@
 import 'package:json_annotation/json_annotation.dart';
 
+import '../backends/media_server_kind.dart';
+
 part 'login_history.g.dart';
 
 @JsonSerializable()
@@ -20,6 +22,10 @@ class LoginHistory {
   final String displayHost;
   final int? displayPort;
 
+  /// Which server family this entry signs in to. Defaults to fnOS so entries
+  /// written before the key existed still parse and still log in.
+  final MediaServerKind serverKind;
+
   LoginHistory({
     required this.host,
     required this.port,
@@ -34,12 +40,16 @@ class LoginHistory {
     int? lastLoginTimestamp,
     this.displayHost = "",
     this.displayPort,
+    this.serverKind = MediaServerKind.fnos,
   }) : lastLoginTimestamp =
             lastLoginTimestamp ?? DateTime.now().millisecondsSinceEpoch;
 
   factory LoginHistory.fromJson(Map<String, dynamic> json) =>
       _$LoginHistoryFromJson(json);
   Map<String, dynamic> toJson() => _$LoginHistoryToJson(this);
+
+  /// Whether this entry points at an Emby-family server.
+  bool get isEmbyFamily => serverKind.isEmbyFamily;
 
   String getEndpoint() {
     if (isNasLogin) {
@@ -60,6 +70,9 @@ class LoginHistory {
     if (other is! LoginHistory) return false;
 
     if (isNasLogin != other.isNasLogin) return false;
+    // fnOS and Emby can live on the same host:port and use the same username,
+    // so the server kind has to take part in the identity.
+    if (serverKind != other.serverKind) return false;
 
     if (isNasLogin) {
       return fnId == other.fnId &&
@@ -76,6 +89,7 @@ class LoginHistory {
   @override
   int get hashCode {
     var result = isNasLogin.hashCode;
+    result = 31 * result + serverKind.hashCode;
     if (isNasLogin) {
       result = 31 * result + fnId.hashCode;
     } else {

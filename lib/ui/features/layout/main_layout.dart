@@ -306,13 +306,16 @@ class _MainLayoutState extends ConsumerState<MainLayout> with WindowListener {
           icon: buildNavigationAssetIcon('assets/images/tv.svg'),
           trailing: buildCountText(mediaSum['tv']),
         ),
-        PaneItem(
-          key: const ValueKey('category-live'),
-          title: Text(l10n.mediaTypeLive),
-          body: const SizedBox.shrink(),
-          icon: buildNavigationAssetIcon('assets/images/live_tv.svg'),
-          trailing: buildCountText(mediaSum['live']),
-        ),
+        // Live TV is an fnOS-only capability; the entry would open an empty
+        // list on Emby-family servers.
+        if (ref.watch(backendCapabilitiesProvider).liveTv)
+          PaneItem(
+            key: const ValueKey('category-live'),
+            title: Text(l10n.mediaTypeLive),
+            body: const SizedBox.shrink(),
+            icon: buildNavigationAssetIcon('assets/images/live_tv.svg'),
+            trailing: buildCountText(mediaSum['live']),
+          ),
         PaneItem(
           key: const ValueKey('category-video'),
           title: Text(l10n.mediaTypeOther),

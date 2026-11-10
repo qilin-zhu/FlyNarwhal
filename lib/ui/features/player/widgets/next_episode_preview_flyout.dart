@@ -8,6 +8,7 @@ import 'package:flutter_cache_manager/flutter_cache_manager.dart'
 import '../../../../data/models/episode_list_response.dart';
 import '../../../../domain/entities/media_type.dart';
 import '../../../../l10n/generated/app_localizations.dart';
+import '../../../shared/common/fn_cached_image.dart';
 import '../../../shared/common/media_poster_placeholder.dart';
 import 'player_action_button.dart';
 
@@ -329,11 +330,8 @@ class _NextEpisodeFlyoutContent extends StatelessWidget {
     if (baseUrl.isEmpty || posterPath == null || posterPath.isEmpty) {
       return null;
     }
-    final normalizedBaseUrl = baseUrl.endsWith('/')
-        ? baseUrl.substring(0, baseUrl.length - 1)
-        : baseUrl;
-    final suffix = posterPath.contains('?') ? '' : '?w=640';
-    return '$normalizedBaseUrl/v/api/v1/sys/img$posterPath$suffix';
+    final url = resolveMediaImageUrl(baseUrl, posterPath, width: 640);
+    return url.isEmpty ? null : url;
   }
 
   String _buildEpisodeTitle(AppLocalizations l10n) {

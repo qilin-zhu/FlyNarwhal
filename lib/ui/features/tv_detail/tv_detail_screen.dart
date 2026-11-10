@@ -20,14 +20,10 @@ import '../movie_detail/detail_components.dart';
 import '../../shared/movie_poster.dart';
 import '../../shared/toast.dart';
 import 'tv_detail_view_model.dart';
+import '../../shared/common/fn_cached_image.dart';
 
-String _buildImageUrl(String baseUrl, String path) {
-  if (baseUrl.isEmpty || path.isEmpty) return '';
-  final normalizedBaseUrl = baseUrl.endsWith('/')
-      ? baseUrl.substring(0, baseUrl.length - 1)
-      : baseUrl;
-  return '$normalizedBaseUrl/v/api/v1/sys/img$path';
-}
+String _buildImageUrl(String baseUrl, String path) =>
+    resolveMediaImageUrl(baseUrl, path);
 
 class TvDetailScreen extends ConsumerWidget {
   final String guid;
@@ -53,14 +49,9 @@ class TvDetailScreen extends ConsumerWidget {
     final detailState = ref.watch(tvDetailNotifierProvider(guid));
     final prefsManager = ref.watch(preferencesManagerProvider);
     final baseUrl = prefsManager.getBaseUrl() ?? '';
-    final token = prefsManager.getToken();
-    final cookie = prefsManager.getCookie();
-    final httpHeaders = token != null || (cookie != null && cookie.isNotEmpty)
-        ? {
-            if (token != null) 'Authorization': token,
-            if (cookie != null && cookie.isNotEmpty) 'Cookie': cookie,
-          }
-        : null;
+    // Ask the backend for player/image auth instead of assuming fnOS token +
+    // cookie; an Emby session needs `Authorization: MediaBrowser Token=...`.
+    final httpHeaders = backendImageHeaders(ref);
     final cacheManager = ref.watch(imageCacheManagerProvider);
 
     final theme = FluentTheme.of(context);
@@ -123,7 +114,7 @@ class _TvDetailContentState extends ConsumerState<_TvDetailContent> {
   /// and aborts the unmount, leaving the tree half-finalized.
   @override
   void deactivate() {
-    ref.read(mediaRemoteDataSourceProvider).invalidateDetailCache(widget.guid);
+    ref.read(mediaBackendProvider).invalidateDetailCache(widget.guid);
     super.deactivate();
   }
 
@@ -297,7 +288,8 @@ class _TvDetailContentState extends ConsumerState<_TvDetailContent> {
       placementMode: FlyoutPlacementMode.bottomCenter,
       builder: (context) => MenuFlyout(
         items: [
-          if (ref.read(settingsProvider).flyNarwhalServerEnabled)
+          if (ref.read(settingsProvider).flyNarwhalServerEnabled &&
+              ref.read(backendCapabilitiesProvider).smartSkip)
             MenuFlyoutItem(
               key: const ValueKey('tv-smart-analysis'),
               text: Text(AppLocalizations.of(context).tvDetailSmartAnalysis),
@@ -511,7 +503,10 @@ class _TvDetailContentState extends ConsumerState<_TvDetailContent> {
                         itemTitle: item.title,
                         scaleFactor: 1.0,
                         showSmartAnalysis:
-                            ref.watch(settingsProvider).flyNarwhalServerEnabled,
+                            ref.watch(settingsProvider).flyNarwhalServerEnabled &&
+                                ref
+                                    .watch(backendCapabilitiesProvider)
+                                    .smartSkip,
                         onAnalyze: _handleAnalyzeSeason,
                         isSeasonSubmitting: (seasonGuid) => ref
                             .read(smartAnalysisControllerProvider)
@@ -600,16 +595,18 @@ class _TvDetailContentState extends ConsumerState<_TvDetailContent> {
                   : l10n.actionMarkWatched,
               onPressed: _handleToggleWatched,
             ),
-            const SizedBox(width: 16),
-            FlyoutTarget(
-              controller: _moreController,
-              child: CircleIconButton(
-                icon: FluentIcons.more,
-                iconColor: textColor,
-                tooltip: l10n.actionMore,
-                onPressed: () => _showMoreFlyout(item),
+            if (ref.watch(backendCapabilitiesProvider).smartSkip) ...[
+              const SizedBox(width: 16),
+              FlyoutTarget(
+                controller: _moreController,
+                child: CircleIconButton(
+                  icon: FluentIcons.more,
+                  iconColor: textColor,
+                  tooltip: l10n.actionMore,
+                  onPressed: () => _showMoreFlyout(item),
+                ),
               ),
-            ),
+            ],
           ],
         ),
         const SizedBox(width: 96),

@@ -214,11 +214,13 @@ class _RecentlyWatchedItemState extends ConsumerState<RecentlyWatchedItem>
         context.push('/movie/$itemGuid');
         return;
       case 'Episode':
-        final parentGuid = widget.item.parentGuid?.trim();
-        if (parentGuid == null || parentGuid.isEmpty) {
-          return;
-        }
-        context.push('/tv/season/$parentGuid');
+        // Jump to the episode's own detail page. The resume row used to open
+        // the season page instead, which on Emby pointed at the *series* guid
+        // (the mapper's parent_guid) and landed on a page that could not be
+        // resolved — and even on fnOS it dropped the user on the episode list
+        // rather than the episode they clicked.
+        ref.read(navigationStackProvider.notifier).pushPath('/home');
+        context.push('/tv/episode/$itemGuid');
         return;
       case 'LiveChannel':
         // 直播频道没有可进的内容详情页：与海报卡片一致，点击非播放区域

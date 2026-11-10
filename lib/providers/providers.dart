@@ -7,7 +7,15 @@ import 'dart:async';
 import 'dart:io';
 import '../core/config/runtime_configuration.dart';
 import '../core/config/secret_bridge_selector.dart';
+import '../core/network/api_result.dart';
 import '../core/network/dio_client.dart';
+import '../data/backends/emby/emby_api.dart';
+import '../data/backends/emby/emby_media_backend.dart';
+import '../data/backends/emby/emby_tag_source.dart';
+import '../data/backends/fnos/fnos_media_backend.dart';
+import '../data/backends/media_backend.dart';
+import '../data/backends/media_server_kind.dart';
+import '../data/datasources/tag_source.dart';
 import '../core/network/ssl/ssl_trust_manager.dart';
 import '../core/network/ssl/ssl_trust_persistence.dart';
 import '../core/network/ssl/ssl_trust_aware_file_service.dart';
@@ -15,7 +23,6 @@ import '../core/security/password_cipher.dart';
 import '../core/utils/log/app_talker.dart';
 import '../core/utils/log/error_log_exporter.dart';
 import '../data/datasources/remote/fly_narwhal_remote_data_source.dart';
-import '../data/datasources/remote/media_remote_data_source.dart';
 import '../data/datasources/remote/file_remote_data_source.dart';
 import '../data/datasources/remote/subtitle_remote_data_source.dart';
 import '../data/datasources/remote/tag_remote_data_source.dart';
@@ -194,7 +201,19 @@ final sslTrustManagerProvider = Provider<SslTrustManager>((ref) {
   return SslTrustManager.instance;
 });
 
-final tagRemoteDataSourceProvider = Provider<TagRemoteDataSource>((ref) {
+/// Tag metadata (genres, locale tables, filter rows) for the signed-in server.
+///
+/// Emby has no `/tag/*` endpoints, so it gets its own source that synthesises
+/// the same models from `/Items/Filters` + `/Localization/*`. Picking the source
+/// here keeps the repository — and every screen above it — server-agnostic.
+final tagRemoteDataSourceProvider = Provider<TagSource>((ref) {
+  final kind = ref.watch(serverKindProvider);
+  if (kind.isEmbyFamily) {
+    final backend = ref.watch(mediaBackendProvider);
+    if (backend is EmbyMediaBackend) {
+      return EmbyTagSource(backend.api, userId: backend.userId);
+    }
+  }
   final dioClient = ref.watch(dioClientProvider);
   return TagRemoteDataSource(dioClient);
 });
@@ -209,9 +228,62 @@ final iTagRepositoryProvider = Provider<ITagRepository>((ref) {
   return TagRepositoryImpl(remoteDataSource, language: language);
 });
 
-final mediaRemoteDataSourceProvider = Provider<MediaRemoteDataSource>((ref) {
-  final dioClient = ref.watch(dioClientProvider);
-  return MediaRemoteDataSource(dioClient);
+/// The active media backend for the signed-in server (fnOS or Emby family).
+///
+/// This is the single seam between the UI/player layers and the server
+/// contract: screens read [mediaBackendProvider] instead of constructing a
+/// [MediaRemoteDataSource], so adding a backend needs no view-model changes.
+///
+/// Rebuilds when the auth generation changes, which happens exactly when a
+/// login (or logout) rewrites the persisted session.
+final mediaBackendProvider = Provider<MediaBackend>((ref) {
+  ref.watch(authRefreshProvider);
+  final kind = ref.watch(serverKindProvider);
+
+  if (kind.isEmbyFamily) {
+    final prefs = ref.watch(preferencesManagerProvider);
+    final baseUrl = prefs.getBaseUrl() ?? '';
+    final accessToken = prefs.getEmbyAccessToken() ?? '';
+    final userId = prefs.getEmbyUserId() ?? '';
+    if (baseUrl.isNotEmpty && accessToken.isNotEmpty && userId.isNotEmpty) {
+      return EmbyMediaBackend(
+        api: EmbyApi(
+          credentials: EmbyCredentials(
+            baseUrl: baseUrl,
+            accessToken: accessToken,
+            userId: userId,
+            deviceId: prefs.getFallbackDeviceId() ?? '',
+          ),
+        ),
+        initialBaseUrl: baseUrl,
+      );
+    }
+    // Session is half-written (login in flight or logout in progress). Fall
+    // through to fnOS so the provider stays total instead of throwing.
+  }
+
+  final prefs = ref.watch(preferencesManagerProvider);
+  return FnosMediaBackend.fromDioClient(
+    ref.watch(dioClientProvider),
+    getToken: () => prefs.getToken() ?? '',
+    getCookie: () => prefs.getCookie() ?? '',
+    getCurrentUser: () => ref.read(userRemoteDataSourceProvider).getUserInfo(),
+  );
+});
+
+/// Which server family the current session belongs to.
+///
+/// Separate from [mediaBackendProvider] because the login screen needs the
+/// answer before any token exists.
+final serverKindProvider = Provider<MediaServerKind>((ref) {
+  ref.watch(authRefreshProvider);
+  return ref.watch(preferencesManagerProvider).getServerKind();
+});
+
+/// Feature flags for the active server; shared UI hides entries the server
+/// cannot serve (danmaku, smart skip, netdisk direct link, IPTV).
+final backendCapabilitiesProvider = Provider<BackendCapabilities>((ref) {
+  return ref.watch(mediaBackendProvider).capabilities;
 });
 
 // User remote data source provider
@@ -321,10 +393,10 @@ final flyNarwhalConnectionTestProvider = StateNotifierProvider<
 final smartAnalysisControllerProvider = StateNotifierProvider<
     SmartAnalysisController, SmartAnalysisSubmissionState>((ref) {
   final flyNarwhalDataSource = ref.watch(flyNarwhalRemoteDataSourceProvider);
-  final mediaDataSource = ref.watch(mediaRemoteDataSourceProvider);
+  final mediaBackend = ref.watch(mediaBackendProvider);
   return SmartAnalysisController(
     flyNarwhalDataSource,
-    mediaDataSource,
+    mediaBackend,
     getL10n: () => lookupAppLocalizations(
       AppLanguage.localeFromValue(ref.read(settingsProvider).language),
     ),
@@ -605,19 +677,19 @@ final settingsProvider =
 });
 
 class UserInfoNotifier extends StateNotifier<AsyncValue<UserInfo?>> {
-  UserInfoNotifier(this._prefs, this._dataSource, this._invalidateSession)
+  UserInfoNotifier(this._prefs, this._backend, this._invalidateSession)
       : super(const AsyncValue.data(null));
 
   final PreferencesManager _prefs;
-  final UserRemoteDataSource _dataSource;
+  final MediaBackend _backend;
   final Future<void> Function() _invalidateSession;
 
   // Load user info only when the current session is authenticated.
   Future<void> loadUserInfo({bool force = false}) async {
-    final token = _prefs.getToken();
+    // Each backend knows its own signed-in state: fnOS needs a session token,
+    // Emby an access token plus a user id.
     final baseUrl = _prefs.getBaseUrl();
-    final isLoggedIn = token != null &&
-        token.isNotEmpty &&
+    final isLoggedIn = _backend.hasSession &&
         baseUrl != null &&
         baseUrl.isNotEmpty;
     if (!isLoggedIn) {
@@ -636,13 +708,25 @@ class UserInfoNotifier extends StateNotifier<AsyncValue<UserInfo?>> {
 
     state = const AsyncValue.loading();
     try {
-      final result = await _dataSource.getUserInfo();
+      final result = await _backend.getCurrentUser();
       state = AsyncValue.data(result.getOrThrow());
-    } catch (_) {
-      // Any user-info failure invalidates the local session and returns to login,
-      // mirroring KMP LoginStateManager behavior.
-      await _invalidateSession();
-      state = const AsyncValue.data(null);
+    } catch (error) {
+      // A failure here is normally a dead session, so invalidate it and return
+      // to login — mirroring KMP LoginStateManager behavior. Transient network
+      // errors must not wipe the persisted session though: only an explicit
+      // server rejection (401/403) counts as "signed out".
+      final code = error is FailureInfo ? error.code : null;
+      final rejected = code == 401 || code == 403;
+      AppTalker.warning(
+        'UserInfo',
+        'getCurrentUser failed (code=$code rejected=$rejected): $error',
+      );
+      if (rejected) {
+        await _invalidateSession();
+        state = const AsyncValue.data(null);
+        return;
+      }
+      state = AsyncValue.error(error, StackTrace.current);
     }
   }
 
@@ -655,10 +739,10 @@ class UserInfoNotifier extends StateNotifier<AsyncValue<UserInfo?>> {
 final userInfoProvider =
     StateNotifierProvider<UserInfoNotifier, AsyncValue<UserInfo?>>((ref) {
   final prefs = ref.watch(preferencesManagerProvider);
-  final dataSource = ref.watch(userRemoteDataSourceProvider);
+  final backend = ref.watch(mediaBackendProvider);
   return UserInfoNotifier(
     prefs,
-    dataSource,
+    backend,
     ref.read(sessionStateControllerProvider).invalidateSession,
   );
 });

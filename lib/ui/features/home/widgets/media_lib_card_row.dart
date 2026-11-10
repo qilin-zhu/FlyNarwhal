@@ -10,6 +10,7 @@ import '../../../../providers/providers.dart';
 import '../../../shared/common/img_loading_progress_ring.dart';
 import '../../../shared/common/media_poster_placeholder.dart';
 import '../../../shared/common/scroll_row.dart';
+import '../../../shared/common/fn_cached_image.dart';
 
 class MediaLibCardRow extends ConsumerWidget {
   final List<MediaDbListResponse> items;
@@ -27,14 +28,9 @@ class MediaLibCardRow extends ConsumerWidget {
     final scaleFactor = resolveWindowScaleFactor(context);
     final prefs = ref.watch(preferencesManagerProvider);
     final baseUrl = prefs.getBaseUrl();
-    final token = prefs.getToken();
-    final cookie = prefs.getCookie();
-    final httpHeaders = token != null || (cookie != null && cookie.isNotEmpty)
-        ? {
-            if (token != null) 'Authorization': token,
-            if (cookie != null && cookie.isNotEmpty) 'Cookie': cookie,
-          }
-        : null;
+    // Ask the backend for player/image auth instead of assuming fnOS token +
+    // cookie; an Emby session needs `Authorization: MediaBrowser Token=...`.
+    final httpHeaders = backendImageHeaders(ref);
     final itemHeight = 160 * scaleFactor;
     final cacheManager = ref.watch(imageCacheManagerProvider);
 
@@ -139,63 +135,73 @@ class MediaLibraryCard extends StatelessWidget {
                     color: Colors.grey[20].withValues(alpha: 0.12),
                   ),
                   clipBehavior: Clip.antiAlias,
-                  child: Stack(
-                    children: [
-                      Column(
-                        children: [
-                          Expanded(
-                            flex: 7,
-                            child: _PosterRow(
-                              posters: visiblePosters,
-                              placeholderType: placeholderType,
-                              baseUrl: baseUrl,
-                              httpHeaders: httpHeaders,
-                              cacheManager: cacheManager,
+                  child: visiblePosters.length == 1
+                      ? _FullBleedPoster(
+                          poster: visiblePosters.first,
+                          placeholderType: placeholderType,
+                          title: title,
+                          baseUrl: baseUrl,
+                          httpHeaders: httpHeaders,
+                          cacheManager: cacheManager,
+                          scaleFactor: scaleFactor,
+                        )
+                      : Stack(
+                          children: [
+                            Column(
+                              children: [
+                                Expanded(
+                                  flex: 7,
+                                  child: _PosterRow(
+                                    posters: visiblePosters,
+                                    placeholderType: placeholderType,
+                                    baseUrl: baseUrl,
+                                    httpHeaders: httpHeaders,
+                                    cacheManager: cacheManager,
+                                  ),
+                                ),
+                                Expanded(
+                                  flex: 3,
+                                  child: Transform(
+                                    alignment: Alignment.center,
+                                    transform: Matrix4.identity()
+                                      ..scaleByDouble(1.0, -1.0, 1.0, 1.0),
+                                    child: _PosterRow(
+                                      posters: visiblePosters,
+                                      placeholderType: placeholderType,
+                                      baseUrl: baseUrl,
+                                      httpHeaders: httpHeaders,
+                                      cacheManager: cacheManager,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
-                          ),
-                          Expanded(
-                            flex: 3,
-                            child: Transform(
-                              alignment: Alignment.center,
-                              transform: Matrix4.identity()
-                                ..scaleByDouble(1.0, -1.0, 1.0, 1.0),
-                              child: _PosterRow(
-                                posters: visiblePosters,
-                                placeholderType: placeholderType,
-                                baseUrl: baseUrl,
-                                httpHeaders: httpHeaders,
-                                cacheManager: cacheManager,
+                            Align(
+                              alignment: Alignment.bottomCenter,
+                              child: FractionallySizedBox(
+                                widthFactor: 1,
+                                heightFactor: 0.3,
+                                child: Container(
+                                  color: const Color(0xE61C1C1C),
+                                  alignment: Alignment.center,
+                                  child: Text(
+                                    title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: FluentTheme.of(context)
+                                        .typography
+                                        .caption
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.normal,
+                                          fontSize: 14 * scaleFactor,
+                                          color: Colors.white,
+                                        ),
+                                  ),
+                                ),
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                      Align(
-                        alignment: Alignment.bottomCenter,
-                        child: FractionallySizedBox(
-                          widthFactor: 1,
-                          heightFactor: 0.3,
-                          child: Container(
-                            color: const Color(0xE61C1C1C),
-                            alignment: Alignment.center,
-                            child: Text(
-                              title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: FluentTheme.of(context)
-                                  .typography
-                                  .caption
-                                  ?.copyWith(
-                                    fontWeight: FontWeight.normal,
-                                    fontSize: 14 * scaleFactor,
-                                    color: Colors.white,
-                                  ),
-                            ),
-                          ),
+                          ],
                         ),
-                      ),
-                    ],
-                  ),
                 ),
               ),
               AnimatedOpacity(
@@ -209,6 +215,92 @@ class MediaLibraryCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Single-cover card used for Emby/Jellyfin libraries: the landscape image
+/// fills the whole card (no 1/4-width squeeze, no reflection strip) and the
+/// title sits on a bottom gradient, matching Emby's "my media" tiles.
+class _FullBleedPoster extends StatelessWidget {
+  final String poster;
+  final MediaType placeholderType;
+  final String title;
+  final String? baseUrl;
+  final Map<String, String>? httpHeaders;
+  final cache_manager.CacheManager cacheManager;
+  final double scaleFactor;
+
+  const _FullBleedPoster({
+    required this.poster,
+    required this.placeholderType,
+    required this.title,
+    required this.baseUrl,
+    required this.httpHeaders,
+    required this.cacheManager,
+    required this.scaleFactor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final imageUrl = _buildPosterUrl(baseUrl, poster);
+    final child = imageUrl == null
+        ? Container(
+            color: Colors.grey[140].withValues(alpha: 0.2),
+            alignment: Alignment.center,
+            child: MediaPosterPlaceholder(type: placeholderType),
+          )
+        : CachedNetworkImage(
+            imageUrl: imageUrl,
+            httpHeaders: httpHeaders,
+            cacheManager: cacheManager,
+            fit: BoxFit.cover,
+            fadeOutDuration: const Duration(milliseconds: 120),
+            errorWidget: (context, url, error) =>
+                const Center(child: Icon(FluentIcons.error)),
+            placeholder: (context, url) => const ImgLoadingProgressRing(),
+          );
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        child,
+        Align(
+          alignment: Alignment.bottomCenter,
+          child: FractionallySizedBox(
+            widthFactor: 1,
+            heightFactor: 0.45,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    const Color(0xFF1C1C1C).withValues(alpha: 0),
+                    const Color(0xFF1C1C1C).withValues(alpha: 0.85),
+                  ],
+                ),
+              ),
+              child: Align(
+                alignment: Alignment.bottomLeft,
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(14 * scaleFactor,
+                      0, 14 * scaleFactor, 10 * scaleFactor),
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: FluentTheme.of(context).typography.caption?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15 * scaleFactor,
+                          color: Colors.white,
+                        ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -304,14 +396,8 @@ class _PosterImage extends StatelessWidget {
 }
 
 String? _buildPosterUrl(String? baseUrl, String poster) {
-  final trimmed = poster.trim();
-  if (trimmed.isEmpty) return null;
-  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-    return trimmed;
-  }
-  if (baseUrl == null) return null;
-  final suffix = trimmed.contains('?') ? '' : '?w=400';
-  return '$baseUrl/v/api/v1/sys/img$trimmed$suffix';
+  final url = resolveMediaImageUrl(baseUrl, poster, width: 400);
+  return url.isEmpty ? null : url;
 }
 
 double resolveWindowScaleFactor(BuildContext context) {

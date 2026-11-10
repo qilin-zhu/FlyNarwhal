@@ -74,13 +74,19 @@ final routerProvider = Provider<GoRouter>((ref) {
         ? _driverInitialRoute
         : '/login',
     redirect: (context, state) {
-      final token = prefs.getToken();
+      // Ask the backend rather than reading fnOS storage keys directly: an
+      // Emby session stores an access token and user id, never `auth_token`,
+      // so a token check here would bounce every Emby login straight back to
+      // this screen.
+      final backend = ref.read(mediaBackendProvider);
       final baseUrl = prefs.getBaseUrl();
-      final isLoggedIn = token != null && baseUrl != null;
+      final isLoggedIn = backend.hasSession && baseUrl != null;
       final isOnLogin = state.matchedLocation == '/login';
       AppTalker.info(
         'Router',
-        'location="${state.matchedLocation}" token=${token != null} tokenLength=${token?.length ?? 0} baseUrl=${baseUrl != null} isLoggedIn=$isLoggedIn',
+        'location="${state.matchedLocation}" '
+            'backend=${backend.runtimeType} hasSession=${backend.hasSession} '
+            'baseUrl=${baseUrl != null} isLoggedIn=$isLoggedIn',
       );
 
       if (!isLoggedIn) {

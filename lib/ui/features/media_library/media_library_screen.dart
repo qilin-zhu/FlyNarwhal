@@ -258,6 +258,20 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen> {
     if (!_isLiveLibrary && !_supportsLibrarySettings) {
       return;
     }
+    // fnOS stores this layout/sort blob per user via `user/data`; Emby-family
+    // servers expose no equivalent, so fall back to the defaults locally.
+    if (!ref.read(backendCapabilitiesProvider).perUserSync) {
+      if (!mounted) return;
+      setState(() {
+        _liveSettings = const LiveLibrarySettings();
+        _sortColumn = _defaultSortColumn();
+        _sortOrder = _defaultSortOrder();
+      });
+      await ref
+          .read(mediaLibraryNotifierProvider(_providerGuid).notifier)
+          .refreshWithQuery(_buildBrowseRequest());
+      return;
+    }
     final dataSource = ref.read(userRemoteDataSourceProvider);
     try {
       final result = await dataSource.getUserData(UserDataGetRequest(
@@ -318,6 +332,10 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen> {
     setState(() {
       _liveSettings = next;
     });
+    if (!ref.read(backendCapabilitiesProvider).perUserSync) {
+      await _refresh();
+      return;
+    }
     final dataSource = ref.read(userRemoteDataSourceProvider);
     try {
       await dataSource.setUserData(UserDataSetRequest(
@@ -577,7 +595,8 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen> {
       itemBuilder: (context, index) {
         final item = items[index];
         final smartAnalysisEnabled =
-            ref.watch(settingsProvider).flyNarwhalServerEnabled;
+            ref.watch(settingsProvider).flyNarwhalServerEnabled &&
+                ref.watch(backendCapabilitiesProvider).smartSkip;
         final isDirectory =
             MediaType.tryParse(item.type) == MediaType.directory;
         return Column(
@@ -955,7 +974,8 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen> {
 
     // Listen to smart analysis submission results for Season/TV items
     final smartAnalysisEnabled =
-        ref.watch(settingsProvider).flyNarwhalServerEnabled;
+        ref.watch(settingsProvider).flyNarwhalServerEnabled &&
+            ref.watch(backendCapabilitiesProvider).smartSkip;
     for (final item in items) {
       final mediaType = MediaType.tryParse(item.type);
       if (mediaType != MediaType.season && mediaType != MediaType.tv) {

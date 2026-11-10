@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../../../../core/utils/log/app_talker.dart';
 import '../../../../domain/entities/media_type.dart';
 
+import '../../../../data/backends/media_backend.dart';
 import '../../../../data/models/cloud_storage_type.dart';
 import '../../../../data/models/episode_list_response.dart';
 import '../../../../data/models/movie_detail_models.dart';
@@ -140,15 +141,18 @@ class EpisodeContext {
 class PlayerSessionCoordinator {
   PlayerSessionCoordinator({
     required PlayerService playerService,
+    required MediaBackend backend,
     required PreferencesManager preferencesManager,
     required PlayerSettingsManager playerSettingsManager,
     required Dio dio,
   })  : _playerService = playerService,
+        _backend = backend,
         _preferencesManager = preferencesManager,
         _playerSettingsManager = playerSettingsManager,
         _dio = dio;
 
   final PlayerService _playerService;
+  final MediaBackend _backend;
   final PreferencesManager _preferencesManager;
   final PlayerSettingsManager _playerSettingsManager;
   final Dio _dio;
@@ -752,17 +756,14 @@ class PlayerSessionCoordinator {
     );
   }
 
+  /// Headers mpv must send for the current server.
+  ///
+  /// Delegated to the backend because the auth shape differs: fnOS wants the
+  /// `Trim-MC-token` cookie plus the raw token in `Authorization`, while the
+  /// Emby family wants `Authorization: MediaBrowser Token="…"`. Sending fnOS
+  /// headers to Emby (or vice versa) makes the stream 401 mid-playback.
   Map<String, String> buildPlayerHeaders() {
-    final headers = <String, String>{};
-    final cookie = _preferencesManager.getCookie();
-    if (cookie != null && cookie.isNotEmpty) {
-      headers['Cookie'] = cookie;
-    }
-    final token = _preferencesManager.getToken();
-    if (token != null && token.isNotEmpty) {
-      headers['Authorization'] = token;
-    }
-    return headers;
+    return _backend.playerHeaders;
   }
 
   PlayPlayRequest createPlayRequest({
@@ -814,17 +815,6 @@ class PlayerSessionCoordinator {
     QualityResponse? quality,
     List<QualityResponse> qualities,
   ) {
-    if (_requiresHlsPlayback(videoStream)) {
-      AppTalker.info(
-        'Player',
-        'direct-link decision: HLS required (DolbyVision profile '
-            '${videoStream.dvProfile}) codec=${videoStream.codecName} '
-            'colorRangeType=${videoStream.colorRangeType} '
-            'resolutionType=${videoStream.resolutionType} '
-            'bps=${videoStream.bps} -> transcode',
-      );
-      return false;
-    }
     final originalQuality = qualities.firstOrNull;
     final isOriginalQuality = quality != null &&
         originalQuality != null &&
@@ -876,11 +866,6 @@ class PlayerSessionCoordinator {
       }
     }
     return result ?? qualities.firstOrNull;
-  }
-
-  bool _requiresHlsPlayback(VideoStream videoStream) {
-    return videoStream.colorRangeType == 'DolbyVision' &&
-        videoStream.dvProfile == 5;
   }
 
   String ensureDirectPlayRecordLink(String? currentLink) {
@@ -953,10 +938,7 @@ class PlayerSessionCoordinator {
     int? cloudStorageType,
     int? directLinkAudioIndex,
   }) async {
-    final baseUrl = _preferencesManager.getBaseUrl() ?? '';
-    final base = baseUrl.endsWith('/')
-        ? baseUrl.substring(0, baseUrl.length - 1)
-        : baseUrl;
+    final base = _trimmedBaseUrl();
 
     // When a specific direct-link quality is selected, mirror the web
     // player's provider-specific URL shape.
@@ -1012,11 +994,7 @@ class PlayerSessionCoordinator {
 
     // Baidu Pan (1), Quark Pan (4) and fallbacks: use the NAS proxy with the
     // quality index so the server selects the matching CDN link.
-    final controlPlayLink = '/v/api/v1/media/range/$mediaGuid';
-    final qualityQuery = directLinkQualityIndex != null
-        ? '?direct_link_quality_index=$directLinkQualityIndex'
-        : '';
-    final fullUrl = '$base$controlPlayLink$qualityQuery';
+    //
     // mpv (media_kit) cannot open the backend's "?range=bytes=offset-"
     // query-style direct link; it does not translate the query into a real
     // HTTP Range request, so the stream fails to open. The backend, however,
@@ -1027,11 +1005,35 @@ class PlayerSessionCoordinator {
     // The direct_link_quality_index query is different: the backend selects
     // the matching CDN link server-side and still serves standard ranges, so
     // it is safe to keep (mirrors the web player's URL shape).
+    //
+    // The URL shape is the backend's business: fnOS serves `media/range/:guid`,
+    // Emby serves `/Videos/{id}/stream?static=true&ApiKey=…` and ignores the
+    // quality index (it only ever streams the original file).
+    final fullUrl = _backend.buildDirectStreamUrl(
+      mediaGuid,
+      directLinkQualityIndex: directLinkQualityIndex,
+    );
     return DirectPlayLinkResult(
       playUri: fullUrl,
-      playLinkRaw: controlPlayLink,
+      playLinkRaw: _stripOrigin(fullUrl),
       effectiveStartMs: startPositionMs,
     );
+  }
+
+  String _trimmedBaseUrl() {
+    final baseUrl = _preferencesManager.getBaseUrl() ?? '';
+    return baseUrl.endsWith('/')
+        ? baseUrl.substring(0, baseUrl.length - 1)
+        : baseUrl;
+  }
+
+  /// Drops the `scheme://host[:port]` prefix so the cached raw link stays
+  /// relative for fnOS, matching what the rest of the player persists.
+  String _stripOrigin(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return url;
+    if (!uri.hasScheme) return url;
+    return uri.hasQuery ? '${uri.path}?${uri.query}' : uri.path;
   }
 
   /// Builds the /wp/m3u8 proxy URL for 115 Pan m3u8 qualities.
@@ -1249,6 +1251,7 @@ final playerSessionCoordinatorProvider =
     Provider<PlayerSessionCoordinator>((ref) {
   return PlayerSessionCoordinator(
     playerService: ref.watch(playerServiceProvider),
+    backend: ref.watch(mediaBackendProvider),
     preferencesManager: ref.watch(preferencesManagerProvider),
     playerSettingsManager: ref.watch(playerSettingsManagerProvider),
     dio: ref.watch(dioClientProvider).dio,

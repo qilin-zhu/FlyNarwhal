@@ -127,7 +127,7 @@ class MediaLibraryNotifier extends _$MediaLibraryNotifier {
   }
 
   Future<MediaLibraryState> _fetch(MediaLibraryBrowseRequest request) async {
-    final remote = ref.read(mediaRemoteDataSourceProvider);
+    final remote = ref.read(mediaBackendProvider);
     final query = request.toItemListQueryRequest();
     final result = request.favoriteOnly
         ? await remote.getFavoriteList(query)

@@ -350,7 +350,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final l10n = AppLocalizations.of(context);
     final guid = item.guid.trim();
     if (guid.isEmpty) return;
-    final dataSource = ref.read(mediaRemoteDataSourceProvider);
+    final dataSource = ref.read(mediaBackendProvider);
     try {
       final result = await dataSource.deletePlayRecord(guid);
       final ok = result.isSuccess && result.dataOrNull == true;
@@ -393,7 +393,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
     if (deleteFile == null || !mounted) return;
 
-    final dataSource = ref.read(mediaRemoteDataSourceProvider);
+    final dataSource = ref.read(mediaBackendProvider);
     try {
       final result = await dataSource.deleteItem(guid, deleteFile: deleteFile);
       final ok = result.isSuccess && result.dataOrNull == true;

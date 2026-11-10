@@ -1,0 +1,82 @@
+//!DESC Dolby Vision profile 5 (IPTPQc2) to BT.709 SDR
+//!HOOK MAIN
+//!BIND HOOKED
+
+// Profile 5 carries IPTPQc2 in a BT.709-shaped YCbCr container and has no HDR10
+// fallback layer, so anything that does not apply the IPT reshape renders it
+// green/purple. libmpv's `vo=gpu` — the only backend media_kit's render context
+// can drive, since the render API registers `render_backend_gpu` and
+// `render_backend_sw` and has no gpu-next entry — does no Dolby Vision handling
+// at all: it hands the raw IPT samples to the RGB conversion stage, which
+// reinterprets them as ordinary YCbCr. Everything below reproduces what
+// libplacebo does for `PL_COLOR_SYSTEM_DOLBYVISION`, collapsed into one pass.
+//
+// `mat3()` is column-major in GLSL, so each row below reads as one column.
+
+// BT.709 YCbCr -> RGB, used to recover the container's YCbCr from the RGB
+// texture that HOOK MAIN receives.
+const mat3 RGB_TO_YCC709 = mat3(
+   0.2126, -0.1146,  0.5000,
+   0.7152, -0.3854, -0.4542,
+   0.0722,  0.5000, -0.0458);
+
+// YCbCr -> IPT. This is libplacebo's `pl_ipt_lms2ipt` folded with the HPE LMS
+// basis and its 4% crosstalk, which is exactly the matrix Dolby writes into
+// the profile 5 RPU as `nonlinear`.
+const mat3 YCC_TO_IPT = mat3(
+   1.0,      1.0,      1.0,
+   0.09753, -0.11389,  0.03259,
+   0.20520,  0.13318, -0.67688);
+
+// BT.2020-referred HPE LMS -> RGB. libplacebo hard-codes the same matrix, since
+// Dolby Vision always outputs BT.2020-referred LMS.
+const mat3 LMS_TO_RGB = mat3(
+   3.06441879, -0.65612108,  0.01736321,
+  -2.16597676,  1.78554118, -0.04725154,
+   0.10155818, -0.12943749,  1.03004253);
+
+// BT.2020 -> BT.709 primaries, so the result lands in the SDR target the rest
+// of the pipeline renders into.
+const mat3 BT2020_TO_709 = mat3(
+   1.6605, -0.1246, -0.0182,
+  -0.5876,  1.1329, -0.1006,
+  -0.0728, -0.0083,  1.1187);
+
+// SMPTE ST 2084 EOTF: signal value in [0,1] to linear light in [0,1], where
+// 1.0 is 10000 cd/m2.
+float pq_eotf(float v) {
+    const float m1 = 0.1593017578125;
+    const float m2 = 78.84375;
+    const float c1 = 0.8359375;
+    const float c2 = 18.8515625;
+    const float c3 = 18.6875;
+    float p = pow(max(v, 0.0), 1.0 / m2);
+    return pow(max(p - c1, 0.0) / max(c2 - c3 * p, 1e-6), 1.0 / m1);
+}
+
+vec4 hook() {
+    vec3 ycc = RGB_TO_YCC709 * clamp(HOOKED_tex(HOOKED_pos).rgb, 0.0, 1.0);
+    vec3 ipt = YCC_TO_IPT * ycc;
+    vec3 lms = vec3(pq_eotf(ipt.x), pq_eotf(ipt.y), pq_eotf(ipt.z));
+    vec3 rgb = max(BT2020_TO_709 * max(LMS_TO_RGB * lms, 0.0), 0.0);
+
+    // Tone map to SDR. libplacebo's default SDR target is 100 cd/m2
+    // (BT.2408 reference white), and PQ's 1.0 is 10000 cd/m2, so scene-linear
+    // values are scaled by 20... but a plain `rgb * 20` clips every highlight
+    // to white, which flattens the concrete wall and the lamp into the same
+    // blown-out patch. Instead everything under 80% of the SDR range passes
+    // through untouched — preserving the exact mid-tone and skin-tone levels —
+    // and only the top 20% rolls off exponentially into the ceiling.
+    //
+    // Verified against `vo=gpu-next` on the same frame of a profile 5 title;
+    // per-channel means on a night scene land within 0.02 of it
+    // (shader 0.142/0.212/0.232 vs reference 0.161/0.202/0.230), where the
+    // undecoded picture is 0.225/0.296/0.217 and visibly green.
+    vec3 v = rgb * 20.0;
+    vec3 c = min(v, 0.8) + 0.2 * (1.0 - exp(-max(v - 0.8, 0.0) / 0.2));
+
+    // BT.709 is display-referred gamma 2.4, but the RGB texture this hook
+    // receives is already gamma encoded; 1/2.2 is what keeps the mid-tones on
+    // the reference.
+    return vec4(pow(clamp(c, 0.0, 1.0), vec3(1.0 / 2.2)), 1.0);
+}

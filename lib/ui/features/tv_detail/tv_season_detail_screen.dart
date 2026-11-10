@@ -34,13 +34,8 @@ import '../../shared/semi_icons.dart';
 import 'tv_season_detail_view_model.dart';
 import 'package:fly_narwhal/ui/shared/app_button.dart';
 
-String _buildImageUrl(String baseUrl, String path) {
-  if (baseUrl.isEmpty || path.isEmpty) return '';
-  final normalizedBaseUrl = baseUrl.endsWith('/')
-      ? baseUrl.substring(0, baseUrl.length - 1)
-      : baseUrl;
-  return '$normalizedBaseUrl/v/api/v1/sys/img$path';
-}
+String _buildImageUrl(String baseUrl, String path) =>
+    resolveMediaImageUrl(baseUrl, path);
 
 const double _episodePosterHeight = 140;
 const double _episodePosterWidth = _episodePosterHeight * 16 / 9;
@@ -75,14 +70,9 @@ class TvSeasonDetailScreen extends ConsumerWidget {
     final detailState = ref.watch(tvSeasonDetailNotifierProvider(guid));
     final prefsManager = ref.watch(preferencesManagerProvider);
     final baseUrl = prefsManager.getBaseUrl() ?? '';
-    final token = prefsManager.getToken();
-    final cookie = prefsManager.getCookie();
-    final httpHeaders = token != null || (cookie != null && cookie.isNotEmpty)
-        ? {
-            if (token != null) 'Authorization': token,
-            if (cookie != null && cookie.isNotEmpty) 'Cookie': cookie,
-          }
-        : null;
+    // Ask the backend for player/image auth instead of assuming fnOS token +
+    // cookie; an Emby session needs `Authorization: MediaBrowser Token=...`.
+    final httpHeaders = backendImageHeaders(ref);
     final cacheManager = ref.watch(imageCacheManagerProvider);
 
     return ScaffoldPage(
@@ -132,6 +122,12 @@ class _TvSeasonDetailContent extends ConsumerStatefulWidget {
 class _TvSeasonDetailContentState
     extends ConsumerState<_TvSeasonDetailContent> {
   late final FlyoutController _moreController = FlyoutController();
+
+  /// Smart analysis is a fnOS-side service; hide every entry point on servers
+  /// that cannot serve it so the menus do not render empty.
+  bool get _smartAnalysisAvailable =>
+      ref.read(settingsProvider).isFlyNarwhalServerAvailable &&
+      ref.read(backendCapabilitiesProvider).smartSkip;
   late final SeasonAnalysisStatusController _seasonAnalysisStatusController;
 
   final ScrollController _castScrollController = ScrollController();
@@ -145,7 +141,7 @@ class _TvSeasonDetailContentState
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       // Only poll when the Fly Narwhal backend service is fully configured
-      if (!ref.read(settingsProvider).isFlyNarwhalServerAvailable) return;
+      if (!_smartAnalysisAvailable) return;
       unawaited(
         _seasonAnalysisStatusController.startPolling(widget.guid),
       );
@@ -161,7 +157,7 @@ class _TvSeasonDetailContentState
   /// and aborts the unmount, leaving the tree half-finalized.
   @override
   void deactivate() {
-    ref.read(mediaRemoteDataSourceProvider).invalidateDetailCache(widget.guid);
+    ref.read(mediaBackendProvider).invalidateDetailCache(widget.guid);
     super.deactivate();
   }
 
@@ -327,6 +323,7 @@ class _TvSeasonDetailContentState
     ref.listen<bool>(
       settingsProvider.select((s) => s.isFlyNarwhalServerAvailable),
       (previous, next) {
+        if (!ref.read(backendCapabilitiesProvider).smartSkip) return;
         if (previous == next) return;
         if (next) {
           unawaited(
@@ -534,8 +531,11 @@ class _TvSeasonDetailContentState
                                 const SizedBox(height: 8),
                                 // Only show smart analysis status when the backend service is fully configured
                                 if (ref
-                                    .watch(settingsProvider)
-                                    .isFlyNarwhalServerAvailable) ...[
+                                        .watch(settingsProvider)
+                                        .isFlyNarwhalServerAvailable &&
+                                    ref
+                                        .watch(backendCapabilitiesProvider)
+                                        .smartSkip) ...[
                                   Text(
                                     AppLocalizations.of(context)
                                         .tvDetailSmartAnalysisStatus(
@@ -748,7 +748,8 @@ class _TvSeasonDetailContentState
               : l10n.actionMarkWatched,
           onPressed: _handleToggleWatched,
         ),
-        if (ref.watch(settingsProvider).flyNarwhalServerEnabled) ...[
+        if (ref.watch(settingsProvider).flyNarwhalServerEnabled &&
+            ref.watch(backendCapabilitiesProvider).smartSkip) ...[
           const SizedBox(width: 16),
           FlyoutTarget(
             controller: _moreController,

@@ -3,7 +3,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/network/api_result.dart';
-import '../../../../data/datasources/remote/media_remote_data_source.dart';
+import '../../../../data/backends/media_backend.dart';
 import '../../../../data/models/episode_list_response.dart';
 import '../../../../data/models/media_request_models.dart';
 import '../../../../data/models/movie_detail_models.dart';
@@ -11,13 +11,13 @@ import '../../../../data/models/player_models.dart';
 import '../../../../providers/providers.dart';
 
 class PlayerService {
-  final MediaRemoteDataSource _mediaRemoteDataSource;
+  final MediaBackend _backend;
 
-  PlayerService(this._mediaRemoteDataSource);
+  PlayerService(this._backend);
 
   // Get play info for a media item.
   Future<PlayInfoResponse> getPlayInfo(String guid, {String? mediaGuid}) async {
-    final result = await _mediaRemoteDataSource.getPlayerPlayInfo(
+    final result = await _backend.getPlayerPlayInfo(
       PlayInfoRequest(itemGuid: guid, mediaGuid: mediaGuid),
     );
     return _unwrapNullableResult(
@@ -40,37 +40,37 @@ class PlayerService {
         userAgent: [AppConstants.userAgent],
       ),
     );
-    final result = await _mediaRemoteDataSource.getStreamInfo(request);
+    final result = await _backend.getStreamInfo(request);
     return _unwrapResult(result);
   }
 
   // Play video with specified parameters.
   Future<PlayPlayResponse> playVideo(PlayPlayRequest request) async {
-    final result = await _mediaRemoteDataSource.playVideo(request);
+    final result = await _backend.playVideo(request);
     return _unwrapResult(result);
   }
 
   // Download external subtitle content for media_kit rendering.
   Future<String> downloadExternalSubtitle(String guid) async {
-    final result = await _mediaRemoteDataSource.downloadExternalSubtitle(guid);
+    final result = await _backend.downloadExternalSubtitle(guid);
     return _unwrapResult(result);
   }
 
   // Get episode list for the current season or series parent.
   Future<List<EpisodeListResponse>> getEpisodeList(String guid) async {
-    final result = await _mediaRemoteDataSource.getEpisodeList(guid);
+    final result = await _backend.getEpisodeList(guid);
     return _unwrapResult(result);
   }
 
   // Update play record (progress).
   Future<void> updatePlayRecord(PlayRecordRequest request) async {
-    final result = await _mediaRemoteDataSource.updatePlayRecord(request);
+    final result = await _backend.updatePlayRecord(request);
     _unwrapResult(result);
   }
 
   // Update live-channel (IPTV) play record.
   Future<void> updateLivePlayRecord(LivePlayRecordRequest request) async {
-    final result = await _mediaRemoteDataSource.updateLivePlayRecord(request);
+    final result = await _backend.updateLivePlayRecord(request);
     _unwrapResult(result);
   }
 
@@ -85,7 +85,7 @@ class PlayerService {
       skipOpening: skipOpening,
       skipEnding: skipEnding,
     );
-    final result = await _mediaRemoteDataSource.setSkipConfig(request);
+    final result = await _backend.setSkipConfig(request);
     _unwrapResult(result);
   }
 
@@ -135,6 +135,6 @@ class PlayerService {
 }
 
 final playerServiceProvider = Provider<PlayerService>((ref) {
-  final remoteDataSource = ref.watch(mediaRemoteDataSourceProvider);
-  return PlayerService(remoteDataSource);
+  final backend = ref.watch(mediaBackendProvider);
+  return PlayerService(backend);
 });

@@ -3,6 +3,8 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../../core/error/login_exception.dart';
 import '../../../core/network/access_code_session.dart';
 import '../../../core/utils/log/app_talker.dart';
+import '../../../data/backends/emby/emby_api.dart';
+import '../../../data/backends/media_server_kind.dart';
 import '../../../data/models/base_response.dart';
 import '../../../data/models/login_history.dart';
 import '../../../data/models/login_request.dart';
@@ -211,6 +213,92 @@ class LoginViewModel extends _$LoginViewModel {
       final refreshNotifier = ref.read(authRefreshProvider.notifier);
       refreshNotifier.state = refreshNotifier.state + 1;
       AppTalker.info('Login', 'auth refresh state=${refreshNotifier.state}');
+    });
+
+    if (state.hasError) {
+      throw state.error!;
+    }
+  }
+
+  /// Signs in to an Emby or Jellyfin server.
+  ///
+  /// Kept separate from [login] because the contract shares nothing with fnOS:
+  /// no `Authx` signature, no access-code gateway, and the token is scoped to a
+  /// user id instead of being a bare session cookie.
+  ///
+  /// The server kind is probed from `System/Info/Public` rather than trusted
+  /// from the form, so picking "Emby" against a Jellyfin box still records the
+  /// right value.
+  Future<void> loginEmby({
+    required String host,
+    required int port,
+    required String username,
+    required String password,
+    required bool isHttps,
+    required bool rememberPassword,
+    String? displayHost,
+    int? displayPort,
+  }) async {
+    state = const AsyncValue.loading();
+    state = await AsyncValue.guard(() async {
+      final prefs = ref.read(preferencesManagerProvider);
+      final protocol = isHttps ? 'https' : 'http';
+      final baseUrl =
+          port == 0 ? '$protocol://$host' : '$protocol://$host:$port';
+
+      final deviceId = prefs.getFallbackDeviceId() ?? '';
+      final auth = await EmbyApi.authenticate(
+        baseUrl: baseUrl,
+        username: username,
+        password: password,
+        deviceId: deviceId,
+      );
+      final result = auth.getOrThrow();
+      final kind = result.isJellyfin
+          ? MediaServerKind.jellyfin
+          : MediaServerKind.emby;
+
+      await prefs.saveBaseUrl(baseUrl);
+      await prefs.saveEmbySession(
+        accessToken: result.accessToken,
+        userId: result.userId,
+      );
+      await prefs.saveServerKind(kind);
+      AppTalker.info(
+        'Login',
+        'emby login ok: kind=${kind.value} product="${result.productName}" '
+            'user="${result.userName}"',
+      );
+
+      // Remember the endpoint through the same history list the fnOS path
+      // uses, so one sidebar shows every server the user has signed in to.
+      final passwordService = ref.read(loginHistoryPasswordServiceProvider);
+      final storedPassword = rememberPassword
+          ? await passwordService.encryptForStorage(password)
+          : null;
+      final history = LoginHistory(
+        host: host,
+        port: port,
+        username: username,
+        password: storedPassword,
+        passwordEncrypted: rememberPassword && storedPassword != null,
+        isHttps: isHttps,
+        rememberPassword: rememberPassword,
+        isNasLogin: false,
+        displayHost: displayHost ?? host,
+        displayPort: displayPort ?? port,
+        serverKind: kind,
+      );
+      final currentHistory = prefs.getLoginHistory();
+      final updatedHistory =
+          currentHistory.where((element) => element != history).toList();
+      updatedHistory.insert(0, history);
+      await prefs.saveLoginHistory(updatedHistory);
+      ref.invalidate(loginHistoryNotifierProvider);
+
+      ref.read(userInfoProvider.notifier).clear();
+      final refreshNotifier = ref.read(authRefreshProvider.notifier);
+      refreshNotifier.state = refreshNotifier.state + 1;
     });
 
     if (state.hasError) {

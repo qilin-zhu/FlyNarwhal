@@ -1,12 +1,16 @@
 import '../../core/network/api_result.dart';
 import '../../domain/entities/index.dart';
 import '../../domain/repositories/i_tag_repository.dart';
-import '../datasources/remote/tag_remote_data_source.dart';
+import '../datasources/tag_source.dart';
 import '../mappers/tag_mapper.dart';
 
 /// Implementation of ITagRepository
+///
+/// Takes a [TagSource] rather than a concrete data source: fnOS answers from its
+/// own `/tag/*` endpoints, Emby synthesises the same models from `/Items/Filters`
+/// and `/Localization/*`. The screens above stay server-agnostic.
 class TagRepositoryImpl implements ITagRepository {
-  final TagRemoteDataSource _remoteDataSource;
+  final TagSource _remoteDataSource;
 
   /// 当前 tag 接口语言（`lan` 参数）。由 provider 随界面语言变化重建而更新；
   /// 显式传入 `language` 的调用优先。

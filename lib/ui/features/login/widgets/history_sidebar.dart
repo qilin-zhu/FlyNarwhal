@@ -6,6 +6,42 @@ import '../../../../data/models/login_history.dart';
 import '../../../../l10n/generated/app_localizations.dart';
 import 'package:fly_narwhal/ui/shared/app_button.dart';
 
+/// Small pill next to a history entry's account name (NAS / emby / jellyfin).
+class _HistoryBadge extends StatelessWidget {
+  const _HistoryBadge({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return GlassContainer(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      shape: const LiquidRoundedSuperellipse(borderRadius: 50),
+      // Keep the badge label visually centered.
+      child: SizedBox(
+        height: 18,
+        child: Center(
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            strutStyle: const StrutStyle(
+              fontSize: 11,
+              height: 1,
+              forceStrutHeight: true,
+            ),
+            style: const TextStyle(
+              color: HistorySidebar._accentColor,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              height: 1,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class HistorySidebar extends StatelessWidget {
   static const Color _textPrimary = Color(0xFFE6E8EC);
   static const Color _textSecondary = Color(0xFF9BA0A6);
@@ -118,34 +154,15 @@ class HistorySidebar extends StatelessWidget {
                                   ),
                                   if (history.isNasLogin) ...[
                                     const SizedBox(width: 8),
-                                    const GlassContainer(
-                                      padding: EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                      ),
-                                      shape: LiquidRoundedSuperellipse(
-                                        borderRadius: 50,
-                                      ),
-                                      // Keep the badge label visually centered.
-                                      child: SizedBox(
-                                        height: 18,
-                                        child: Center(
-                                          child: Text(
-                                            'NAS',
-                                            textAlign: TextAlign.center,
-                                            strutStyle: StrutStyle(
-                                              fontSize: 11,
-                                              height: 1,
-                                              forceStrutHeight: true,
-                                            ),
-                                            style: TextStyle(
-                                              color: _accentColor,
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.w600,
-                                              height: 1,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
+                                    const _HistoryBadge(label: 'NAS'),
+                                  ],
+                                  // fnOS is the implicit default, so only the
+                                  // other server families need a badge to tell
+                                  // two entries on the same host apart.
+                                  if (history.isEmbyFamily) ...[
+                                    const SizedBox(width: 8),
+                                    _HistoryBadge(
+                                      label: history.serverKind.value,
                                     ),
                                   ],
                                 ],

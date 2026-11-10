@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Emby / Jellyfin 服务端支持**：登录页新增「飞牛影视 / Emby / Jellyfin」服务端类型选择，除飞牛影视外也可连接 Emby、Jellyfin 服务器浏览媒体库、搜索、收藏、记录观看进度与直接播放。仅飞牛影视提供的功能（弹幕、智能跳片头片尾、IPTV 直播、网盘直连）在 Emby / Jellyfin 下自动隐藏。
+
 ### Changed
 
 ### Fixed

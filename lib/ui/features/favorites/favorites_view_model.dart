@@ -504,7 +504,7 @@ class FavoritesBrowseNotifier extends _$FavoritesBrowseNotifier {
     required bool updateSelected,
     int? warmSerial,
   }) async {
-    final remote = ref.read(mediaRemoteDataSourceProvider);
+    final remote = ref.read(mediaBackendProvider);
     final cacheKey = query.selectedCacheKey;
     final cached = state.cacheEntries[cacheKey];
     if (warmSerial != null && warmSerial != _backgroundWarmSerial) {

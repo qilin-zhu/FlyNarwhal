@@ -338,7 +338,8 @@ class _FavoritesScreenState extends ConsumerState<FavoritesScreen> {
     final items = favoritesState.items;
 
     final smartAnalysisEnabled =
-        ref.watch(settingsProvider).flyNarwhalServerEnabled;
+        ref.watch(settingsProvider).flyNarwhalServerEnabled &&
+            ref.watch(backendCapabilitiesProvider).smartSkip;
     for (final item in items) {
       final mediaType = MediaType.tryParse(item.type);
       if (mediaType != MediaType.season && mediaType != MediaType.tv) {

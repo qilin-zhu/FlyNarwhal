@@ -3,9 +3,13 @@ import '../../../core/network/dio_client.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../models/base_response.dart';
 import '../../models/tag_models.dart';
+import '../tag_source.dart';
 
-/// Remote data source for tag-related API calls
-class TagRemoteDataSource {
+/// Remote data source for the fnOS tag API.
+///
+/// Implements [TagSource] so the repository can also be handed an Emby-backed
+/// implementation without knowing which server is signed in.
+class TagRemoteDataSource implements TagSource {
   final DioClient _dioClient;
 
   // Caches are keyed by language: the same tag returns different text per `lan`,
@@ -16,6 +20,7 @@ class TagRemoteDataSource {
   TagRemoteDataSource(this._dioClient);
 
   /// Get genres list
+  @override
   Future<ApiResult<List<GenresResponse>>> getGenres({
     required String language,
     bool force = false,
@@ -44,6 +49,7 @@ class TagRemoteDataSource {
   }
 
   /// Get tag map by tag name
+  @override
   Future<ApiResult<Map<String, String>>> getTag(
     String tag, {
     required String language,
@@ -80,6 +86,7 @@ class TagRemoteDataSource {
   }
 
   /// Get tag list for filtering
+  @override
   Future<ApiResult<TagListResponse>> getTagList({
     String? ancestorGuid,
     String? parentGuid,

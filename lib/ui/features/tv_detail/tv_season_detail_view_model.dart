@@ -77,31 +77,31 @@ class TvSeasonDetailNotifier extends _$TvSeasonDetailNotifier {
   }
 
   Future<PlayInfoResponse?> _fetchPlayInfo() async {
-    final remote = ref.read(mediaRemoteDataSourceProvider);
+    final remote = ref.read(mediaBackendProvider);
     final result = await remote.getPlayInfo(ItemGuidRequest(itemGuid: guid));
     return result.dataOrNull;
   }
 
   Future<List<EpisodeListResponse>> _fetchEpisodeList() async {
-    final remote = ref.read(mediaRemoteDataSourceProvider);
+    final remote = ref.read(mediaBackendProvider);
     final result = await remote.getEpisodeList(guid);
     return result.dataOrNull ?? const <EpisodeListResponse>[];
   }
 
   Future<List<SeasonListResponse>> _fetchSeasonList(String parentGuid) async {
-    final remote = ref.read(mediaRemoteDataSourceProvider);
+    final remote = ref.read(mediaBackendProvider);
     final result = await remote.getSeasonList(parentGuid);
     return result.dataOrNull ?? const <SeasonListResponse>[];
   }
 
   Future<void> _fetchStreamList() async {
-    final remote = ref.read(mediaRemoteDataSourceProvider);
+    final remote = ref.read(mediaBackendProvider);
     await remote.getStreamList(guid);
   }
 
   @override
   FutureOr<TvSeasonDetailState> build(String guid) async {
-    final remote = ref.read(mediaRemoteDataSourceProvider);
+    final remote = ref.read(mediaBackendProvider);
     // Watch so tag requests (and their labels) reload when the UI language changes.
     ref.watch(settingsProvider.select((s) => s.language));
     final tagRepo = ref.read(iTagRepositoryProvider);
@@ -165,7 +165,7 @@ class TvSeasonDetailNotifier extends _$TvSeasonDetailNotifier {
 
   Future<ApiResult<ItemResponse>> _fetchItemDetailResult(
       String itemGuid) async {
-    final remote = ref.read(mediaRemoteDataSourceProvider);
+    final remote = ref.read(mediaBackendProvider);
     return remote.getItemDetail(itemGuid);
   }
 
@@ -178,7 +178,7 @@ class TvSeasonDetailNotifier extends _$TvSeasonDetailNotifier {
   }
 
   Future<void> refresh() async {
-    ref.read(mediaRemoteDataSourceProvider).invalidateDetailCache(guid);
+    ref.read(mediaBackendProvider).invalidateDetailCache(guid);
     ref.invalidateSelf();
     await future;
   }
@@ -188,7 +188,7 @@ class TvSeasonDetailNotifier extends _$TvSeasonDetailNotifier {
     if (item == null) return;
 
     try {
-      final remote = ref.read(mediaRemoteDataSourceProvider);
+      final remote = ref.read(mediaBackendProvider);
       final isFavorite = item.isFavorite == 1;
       final response = await remote.toggleFavorite(
         ItemGuidRequest(itemGuid: guid),
@@ -215,7 +215,7 @@ class TvSeasonDetailNotifier extends _$TvSeasonDetailNotifier {
     }
 
     try {
-      final remote = ref.read(mediaRemoteDataSourceProvider);
+      final remote = ref.read(mediaBackendProvider);
       final isWatched = item.isWatched == 1;
       final response = await remote.toggleWatched(
         ItemGuidRequest(itemGuid: guid),
@@ -254,7 +254,7 @@ class TvSeasonDetailNotifier extends _$TvSeasonDetailNotifier {
   Future<bool> toggleEpisodeFavorite(
       String episodeGuid, bool currentFavoriteState) async {
     try {
-      final remote = ref.read(mediaRemoteDataSourceProvider);
+      final remote = ref.read(mediaBackendProvider);
       final response = await remote.toggleFavorite(
         ItemGuidRequest(itemGuid: episodeGuid),
         isFavorite: currentFavoriteState,
@@ -270,7 +270,7 @@ class TvSeasonDetailNotifier extends _$TvSeasonDetailNotifier {
   Future<bool> toggleEpisodeWatched(
       String episodeGuid, bool currentWatchedState) async {
     try {
-      final remote = ref.read(mediaRemoteDataSourceProvider);
+      final remote = ref.read(mediaBackendProvider);
       final response = await remote.toggleWatched(
         ItemGuidRequest(itemGuid: episodeGuid),
         isWatched: currentWatchedState,

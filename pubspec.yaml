@@ -110,6 +110,7 @@ flutter:
     - assets/images/
     - assets/lottie/
     - assets/icons/semi/
+    - assets/shaders/
   fonts:
     - family: SourceHanSansSC
       fonts:

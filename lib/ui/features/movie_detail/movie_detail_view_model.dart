@@ -64,19 +64,19 @@ class MovieDetailState {
 @riverpod
 class MovieDetailNotifier extends _$MovieDetailNotifier {
   Future<ItemResponse> _fetchItem() async {
-    final remote = ref.read(mediaRemoteDataSourceProvider);
+    final remote = ref.read(mediaBackendProvider);
     return (await remote.getItemDetail(guid)).getOrThrow();
   }
 
   Future<StreamListResponse?> _fetchStreamList() async {
-    final remote = ref.read(mediaRemoteDataSourceProvider);
+    final remote = ref.read(mediaBackendProvider);
     final result = await remote.getStreamList(guid);
     return result.dataOrNull;
   }
 
   @override
   FutureOr<MovieDetailState> build(String guid) async {
-    final remote = ref.read(mediaRemoteDataSourceProvider);
+    final remote = ref.read(mediaBackendProvider);
     // Watch so tag requests (and their labels) reload when the UI language changes.
     ref.watch(settingsProvider.select((s) => s.language));
     final tagRepo = ref.read(iTagRepositoryProvider);
@@ -127,7 +127,7 @@ class MovieDetailNotifier extends _$MovieDetailNotifier {
   }
 
   Future<void> refresh() async {
-    ref.read(mediaRemoteDataSourceProvider).invalidateDetailCache(guid);
+    ref.read(mediaBackendProvider).invalidateDetailCache(guid);
     ref.invalidateSelf();
     await future;
   }
@@ -141,7 +141,7 @@ class MovieDetailNotifier extends _$MovieDetailNotifier {
     }
 
     try {
-      final remote = ref.read(mediaRemoteDataSourceProvider);
+      final remote = ref.read(mediaBackendProvider);
       final isFavorite = item.isFavorite == 1;
       final response = await remote.toggleFavorite(
         ItemGuidRequest(itemGuid: guid),
@@ -178,7 +178,7 @@ class MovieDetailNotifier extends _$MovieDetailNotifier {
     }
 
     try {
-      final remote = ref.read(mediaRemoteDataSourceProvider);
+      final remote = ref.read(mediaBackendProvider);
       final isWatched = item.isWatched == 1;
       final response = await remote.toggleWatched(
         ItemGuidRequest(itemGuid: guid),

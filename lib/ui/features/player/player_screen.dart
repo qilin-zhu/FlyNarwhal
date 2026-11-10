@@ -50,6 +50,7 @@ import 'models/resolved_skip_segments.dart';
 import 'services/skip_segment_resolver.dart';
 import 'services/direct_link_audio_track_resolver.dart';
 import 'services/direct_link_subtitle_track_resolver.dart';
+import 'services/dolby_vision_shader.dart';
 import 'services/hls_subtitle_repository.dart';
 import 'services/player_device_context_service.dart';
 import 'services/play_record_request_builder.dart';
@@ -90,6 +91,7 @@ import '../../shared/local_subtitle_upload.dart';
 import '../../shared/nas/add_nas_subtitle_dialog.dart';
 import '../../shared/toast.dart';
 import '../../shared/window_caption.dart';
+import '../../shared/common/fn_cached_image.dart';
 
 enum _PlaybackIndicatorType { play, pause }
 
@@ -472,6 +474,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     if (!mounted || !identical(_player, player)) return;
     await _applyDecodeMode(player);
     if (!mounted || !identical(_player, player)) return;
+    await _applyHdrToneMapping(player);
+    if (!mounted || !identical(_player, player)) return;
     await _applyAudioOutputDevice(player);
     if (!mounted || !identical(_player, player)) return;
     _videoController = VideoController(player);
@@ -575,7 +579,135 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     if (platform is! NativePlayer) {
       return;
     }
-    await platform.setProperty('hwdec', _decodeMode);
+    final hwdec = _effectiveHwdec(
+      isDirectLink: _playingInfoCache?.isUseDirectLink ?? false,
+    );
+    await platform.setProperty('hwdec', hwdec);
+  }
+
+  /// The `hwdec` value that should actually be set for a session.
+  ///
+  /// A Dolby Vision profile 5 direct-link session that applies the decode
+  /// shader needs a system-memory frame, which a plain hardware decoder does not
+  /// provide — mpv silently skips user shaders in that case, which looks exactly
+  /// like the shader not working. `auto-copy` keeps the hardware decoder and
+  /// stages each frame through system memory, so the 4K HEVC stream still
+  /// decodes in hardware while the shader sees the layout it was validated
+  /// against.
+  ///
+  /// An explicit `no` is left alone: that user already has system-memory frames.
+  String _effectiveHwdec({required bool isDirectLink}) {
+    final stream = _playingInfoCache?.currentVideoStream;
+    final isProfile5Direct = isDirectLink && stream?.dvProfile == 5;
+    if (!isProfile5Direct) return _decodeMode;
+    if (_decodeMode == 'no' || _decodeMode.contains('copy')) return _decodeMode;
+    return 'auto-copy';
+  }
+
+  /// Restores HDR peak detection, which media_kit switches off for everyone.
+  ///
+  /// media_kit's defaults target low-end Android phones and include
+  /// `hdr-compute-peak=no` on every platform. With peak detection disabled
+  /// libplacebo never learns how bright the source actually gets, so it maps
+  /// the full PQ range onto the SDR target as if the source peaked there:
+  /// highlights clip to flat white and shadows lift, which is what "washed
+  /// out" looks like on screen.
+  ///
+  /// Measured on a graded HDR10 clip (bt2020 / smpte2084, 1000-nit highlights)
+  /// rendered through the same libplacebo/OpenGL path the player uses, sampling
+  /// the same three bands of the frame in each run:
+  ///
+  ///   peak on   246 /  35 / 204   (three tones stay distinct)
+  ///   peak off  248 /  76 / 254   (shadow lifted, highlight clipped)
+  ///
+  /// Repeatable — three runs per setting produced byte-identical screenshots.
+  /// Disabling any single one of media_kit's other overrides changes nothing,
+  /// so this option alone is the cause.
+  ///
+  /// Written through the generic property API so a libmpv build without
+  /// libplacebo (mobile) logs and continues instead of failing startup.
+  Future<void> _applyHdrToneMapping(Player player) async {
+    final platform = player.platform;
+    if (platform is! NativePlayer) {
+      return;
+    }
+    try {
+      await platform.setProperty('hdr-compute-peak', 'yes');
+    } catch (_) {
+      // Option unknown to this libmpv build; mpv keeps its own default.
+    }
+  }
+
+  /// Dolby Vision profile 5 carries IPTPQc2 in a BT.709-shaped YCbCr container
+  /// and has no HDR10 fallback layer, so a decoder that does not apply the
+  /// IPT reshape shows it green/purple. Neither half of the stack does that
+  /// here: media_kit's render context can only reach `vo_gpu`
+  /// (`vo_libmpv.c` registers `render_backend_gpu` and `render_backend_sw`,
+  /// and `vo_gpu_next` — mpv's only Dolby Vision aware video output — is not
+  /// one of them), and Emby's transcode "tone map" is `vpp_qsv=format=nv12`,
+  /// which just reinterprets the same IPT samples as YCbCr (measured: a
+  /// 48936 HLS segment comes out `0.2834 0.1032 0.3869`, strongly purple).
+  ///
+  /// So profile 5 is decoded in a user shader instead. The shader is bundled
+  /// as an asset and written out here because mpv's `glsl-shaders` only takes
+  /// filesystem paths.
+  ///
+  /// Only applies to a direct-link session. A server transcode has already
+  /// decoded the samples to ordinary YCbCr (badly, but decoded), so running the
+  /// IPT reshape on those frames would invert them again — the shader assumes
+  /// the raw bitstream layout that only direct play delivers.
+  ///
+  /// Profiles 7 and 8 are deliberately left alone: their base layer *is* HDR10,
+  /// which mpv already tags correctly from the bitstream, and the shader only
+  /// converts the IPT layout profile 5 uses.
+  ///
+  /// Clearing the property for everything else is required, not cosmetic — the
+  /// [Player] is reused across opens, so a shader left over from a previous
+  /// profile 5 item would be applied to the next SDR stream and wreck it.
+  Future<void> _applyDolbyVisionShader(
+    Player player,
+    VideoStream? videoStream, {
+    required bool isDirectLink,
+  }) async {
+    final platform = player.platform;
+    if (platform is! NativePlayer) {
+      return;
+    }
+    final isProfile5 = isDirectLink && videoStream?.dvProfile == 5;
+    try {
+      if (!isProfile5) {
+        // Also restores `hwdec`: [_effectiveHwdec] only reports `auto-copy`
+        // while a profile 5 direct session is active, and clearing the shader
+        // is the moment that stops being true for the next open.
+        await platform.setProperty('glsl-shaders', '');
+        await _applyDecodeMode(player);
+        return;
+      }
+      final path = await DolbyVisionShader.ensureExtracted();
+      if (path == null) {
+        AppTalker.warning(
+          'Player',
+          'dolby vision profile 5 decode shader unavailable; '
+              'playing with mpv defaults (colours will be wrong)',
+        );
+        await platform.setProperty('glsl-shaders', '');
+        return;
+      }
+      // A user shader needs a system-memory frame, not a hardware surface;
+      // see [_effectiveHwdec]. Set `hwdec` before the file is opened so the
+      // decoder is initialized in the mode the shader requires — switching it
+      // afterwards reinitializes the video output and drops the first frames.
+      final hwdec = _effectiveHwdec(isDirectLink: isDirectLink);
+      await platform.setProperty('hwdec', hwdec);
+      await platform.setProperty('glsl-shaders', path);
+      AppTalker.info(
+        'Player',
+        'dolby vision profile 5 decode shader enabled: $path (hwdec=$hwdec)',
+      );
+    } catch (e) {
+      // An unknown option or a missing render context must not fail playback.
+      AppTalker.warning('Player', 'apply dolby vision shader failed: $e');
+    }
   }
 
   /// Codecs handed to mpv's [audio-spdif]. mpv only passes a track through when
@@ -1482,7 +1614,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   bool _effectiveSmartSkipEnabled() {
     final settings = ref.read(settingsProvider);
     final smartSkipSettings = ref.read(smartSkipSettingsControllerProvider);
-    return settings.isFlyNarwhalServerAvailable &&
+    return ref.read(backendCapabilitiesProvider).smartSkip &&
+        settings.isFlyNarwhalServerAvailable &&
         smartSkipSettings.enabled &&
         !_isCloudOrStrmPlayback &&
         !_sessionSmartSkipDisabled;
@@ -1492,7 +1625,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   /// below 2.0.0 analyze segments but expose no config API, so the config entry
   /// must stay hidden there even though smart skip itself works.
   bool _smartSkipConfigAvailable(SettingsState settings) {
-    if (!settings.flyNarwhalServerEnabled) return false;
+    if (!ref.read(backendCapabilitiesProvider).smartSkip) {
+      return false;
+    }
+    if (!settings.flyNarwhalServerEnabled) {
+      return false;
+    }
     return ref
             .watch(flyNarwhalServerCapabilitiesProvider)
             .valueOrNull
@@ -2188,6 +2326,20 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       _decodedVideoHeight = 0;
       _resetDirectLinkEmbeddedSubtitleState();
       await source.guard(() => _applyDirectLinkCachePolicy(player, source),
+          isConsumerCurrent: isCurrent);
+      await source.guard(
+          () => _applyDolbyVisionShader(
+                player,
+                // Both paths have already stored the session they are about to
+                // open in [_playingInfoCache]; the direct-link caller also
+                // passes its own copy, which is the same stream.
+                directLinkContext?.currentVideoStream ??
+                    _playingInfoCache?.currentVideoStream,
+                // Only a direct open hands mpv the original bitstream. The HLS
+                // path gets server-decoded frames instead, which the IPT
+                // reshape must not touch.
+                isDirectLink: directLinkContext != null,
+              ),
           isConsumerCurrent: isCurrent);
 
       // Preserve the upstream resume behavior, scoped to this source.
@@ -3600,8 +3752,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       _streamInfo = result.streamInfo;
       _playingInfoCache = result.playingInfoCache;
       final flyNarwhalSettings = ref.read(settingsProvider);
+      // Danmaku and smart skip both live on the FlyNarwhal sidecar server, which
+      // only exists next to a fnOS install. On an Emby backend there is nothing
+      // to configure, so treat both features as unavailable for this session.
+      final backendCapabilities = ref.read(backendCapabilitiesProvider);
       final serverFullyConfigured =
-          flyNarwhalSettings.isFlyNarwhalServerAvailable;
+          flyNarwhalSettings.isFlyNarwhalServerAvailable &&
+              backendCapabilities.danmaku;
       if (serverFullyConfigured) {
         // Probe before every playback: the server may have been updated or
         // rolled back since the last one, and the danmaku contract differs.
@@ -6615,9 +6772,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       return;
     }
 
-    // Guard: require full FlyNarwhal config before enabling danmaku.
+    // Guard: danmaku needs both the sidecar server and a backend that has one.
     final fnSettings = ref.read(settingsProvider);
-    if (!fnSettings.isFlyNarwhalServerAvailable) {
+    if (!ref.read(backendCapabilitiesProvider).danmaku ||
+        !fnSettings.isFlyNarwhalServerAvailable) {
       ref.read(toastManagerProvider.notifier).showToast(
             buildFlyNarwhalConfigWarning(
               AppLocalizations.of(context),
@@ -6668,7 +6826,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     // Guard: require full FlyNarwhal config before enabling smart skip
     if (enabled) {
       final fnSettings = ref.read(settingsProvider);
-      if (!fnSettings.isFlyNarwhalServerAvailable) {
+      if (!ref.read(backendCapabilitiesProvider).smartSkip ||
+          !fnSettings.isFlyNarwhalServerAvailable) {
         if (!mounted) return false;
         ref.read(toastManagerProvider.notifier).showToast(
               buildFlyNarwhalConfigWarning(
@@ -6749,14 +6908,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     final prefs = ref.watch(preferencesManagerProvider);
     final settings = ref.watch(settingsProvider);
     final baseUrl = prefs.getBaseUrl() ?? '';
-    final token = prefs.getToken();
-    final cookie = prefs.getCookie();
-    final httpHeaders = token != null || (cookie != null && cookie.isNotEmpty)
-        ? {
-            if (token != null) 'Authorization': token,
-            if (cookie != null && cookie.isNotEmpty) 'Cookie': cookie,
-          }
-        : null;
+    // Ask the backend for player/image auth instead of assuming fnOS token +
+    // cookie; an Emby session needs `Authorization: MediaBrowser Token=...`.
+    final httpHeaders = backendImageHeaders(ref);
     final cacheManager = ref.watch(imageCacheManagerProvider);
 
     return Row(
@@ -6964,7 +7118,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
           // smart skip as unavailable there: the toggle, the config entry and
           // the "智能跳过" value text all follow this flag.
           isSmartAnalysisGloballyEnabled:
-              settings.flyNarwhalServerEnabled && !_isCloudOrStrmPlayback,
+              ref.read(backendCapabilitiesProvider).smartSkip &&
+                  settings.flyNarwhalServerEnabled &&
+                  !_isCloudOrStrmPlayback,
           // Smart skip itself works on every server that serves
           // /api/analysis/segments; only the config endpoint is newer. The flag
           // below drives the config entry alone, so an old server keeps the

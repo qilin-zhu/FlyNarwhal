@@ -6,7 +6,7 @@ import 'package:path/path.dart' as path;
 
 import '../core/constants/app_constants.dart';
 import '../data/datasources/remote/fly_narwhal_remote_data_source.dart';
-import '../data/datasources/remote/media_remote_data_source.dart';
+import '../data/backends/media_backend.dart';
 import '../core/network/api_result.dart';
 import '../data/models/cloud_storage_type.dart';
 import '../data/models/fly_narwhal/index.dart';
@@ -102,7 +102,7 @@ class SmartAnalysisController
   static const Duration episodeThrottleDelay = Duration(milliseconds: 300);
 
   final FlyNarwhalRemoteDataSource _flyNarwhalRemoteDataSource;
-  final MediaRemoteDataSource _mediaRemoteDataSource;
+  final MediaBackend _mediaBackend;
   final AnalysisDelay _delay;
   final StartSeasonPolling _startSeasonPolling;
   final StartSeasonPolling _startSeasonPreparedPolling;
@@ -112,7 +112,7 @@ class SmartAnalysisController
 
   SmartAnalysisController(
     this._flyNarwhalRemoteDataSource,
-    this._mediaRemoteDataSource, {
+    this._mediaBackend, {
     required AppLocalizations Function() getL10n,
     AnalysisDelay? delay,
     StartSeasonPolling? startSeasonPolling,
@@ -162,7 +162,7 @@ class SmartAnalysisController
   Future<bool> _isCloudOrStrmSeason(String seasonGuid) async {
     try {
       final episodes =
-          (await _mediaRemoteDataSource.getEpisodeList(seasonGuid))
+          (await _mediaBackend.getEpisodeList(seasonGuid))
               .getOrThrow();
       if (episodes.isEmpty) return false;
       return _isCloudOrStrmEpisode(episodes.first.guid);
@@ -176,7 +176,7 @@ class SmartAnalysisController
   Future<bool> _isCloudOrStrmTv(String tvGuid) async {
     try {
       final seasons =
-          (await _mediaRemoteDataSource.getSeasonList(tvGuid)).getOrThrow();
+          (await _mediaBackend.getSeasonList(tvGuid)).getOrThrow();
       if (seasons.isEmpty) return false;
       return _isCloudOrStrmSeason(seasons.first.guid);
     } catch (_) {
@@ -187,14 +187,14 @@ class SmartAnalysisController
   Future<bool> _isCloudOrStrmEpisode(String episodeGuid) async {
     try {
       final streamList =
-          (await _mediaRemoteDataSource.getStreamList(episodeGuid))
+          (await _mediaBackend.getStreamList(episodeGuid))
               .getOrThrow();
       final files = streamList?.files;
       // File-level guid matches videoStream.mediaGuid, same as _submitSeason.
       final mediaGuid = (files != null && files.isNotEmpty)
           ? files.first.guid
           : episodeGuid;
-      final streamInfo = (await _mediaRemoteDataSource.getStreamInfo(
+      final streamInfo = (await _mediaBackend.getStreamInfo(
         StreamRequest(
           mediaGuid: mediaGuid,
           ip: _ipHash(),
@@ -311,7 +311,7 @@ class SmartAnalysisController
     var preparedSeasonGuids = const <String>[];
     try {
       final seasons =
-          (await _mediaRemoteDataSource.getSeasonList(tvGuid)).getOrThrow();
+          (await _mediaBackend.getSeasonList(tvGuid)).getOrThrow();
       final preparingSeasonGuids =
           seasons.map((season) => season.guid).toList();
       await _updateSeasonStatuses(
@@ -398,7 +398,7 @@ class SmartAnalysisController
         _startSeasonPreparedPolling(seasonGuid);
       }
 
-      final episodes = (await _mediaRemoteDataSource.getEpisodeList(seasonGuid))
+      final episodes = (await _mediaBackend.getEpisodeList(seasonGuid))
           .getOrThrow();
       final queuedEpisodes = <QueuedEpisode>[];
       String seasonPath = '';
@@ -408,7 +408,7 @@ class SmartAnalysisController
           episodeIndex++) {
         final episode = episodes[episodeIndex];
         final streamList =
-            (await _mediaRemoteDataSource.getStreamList(episode.guid))
+            (await _mediaBackend.getStreamList(episode.guid))
                 .getOrThrow();
         // Use file-level guid (matching videoStream.mediaGuid) for segment queries
         final files = streamList?.files;

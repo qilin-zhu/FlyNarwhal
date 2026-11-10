@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:fly_narwhal/data/backends/media_backend.dart';
 import 'package:fly_narwhal/data/models/cloud_storage_type.dart';
 import 'package:fly_narwhal/data/models/movie_detail_models.dart';
 import 'package:fly_narwhal/data/models/player_models.dart';
@@ -13,9 +14,12 @@ import 'package:fly_narwhal/ui/features/player/services/player_service.dart';
 
 class _MockPlayerService extends Mock implements PlayerService {}
 
+class _MockMediaBackend extends Mock implements MediaBackend {}
+
 void main() {
   late Dio dio;
   late _MockPlayerService playerService;
+  late _MockMediaBackend backend;
   late PreferencesManager preferencesManager;
   late PlayerSettingsManager playerSettingsManager;
   late PlayerSessionCoordinator coordinator;
@@ -58,10 +62,32 @@ void main() {
       ),
     );
     playerService = _MockPlayerService();
+    backend = _MockMediaBackend();
+    when(() => backend.playerHeaders).thenReturn({
+      'Cookie': 'cookie',
+      'Authorization': 'token',
+    });
+    // Mirror the fnOS backend's URL shape so the coordinator tests keep
+    // asserting on the real direct-play URL they were written against.
+    when(
+      () => backend.buildDirectStreamUrl(
+        any(),
+        directLinkQualityIndex: any(named: 'directLinkQualityIndex'),
+      ),
+    ).thenAnswer((invocation) {
+      final mediaGuid = invocation.positionalArguments.first as String;
+      final qualityIndex =
+          invocation.namedArguments[#directLinkQualityIndex] as int?;
+      final query = qualityIndex == null
+          ? ''
+          : '?direct_link_quality_index=$qualityIndex';
+      return 'https://example.com/v/api/v1/media/range/$mediaGuid$query';
+    });
     preferencesManager = PreferencesManager(prefs);
     playerSettingsManager = PlayerSettingsManager(prefs);
     coordinator = PlayerSessionCoordinator(
       playerService: playerService,
+      backend: backend,
       preferencesManager: preferencesManager,
       playerSettingsManager: playerSettingsManager,
       dio: dio,
@@ -213,6 +239,63 @@ video/main.m3u8
         expect(
           coordinator.supportsDirectLink(stream, qualities.last, qualities),
           isFalse,
+        );
+      },
+    );
+
+    // Dolby Vision must direct play. Emby's ffmpeg never applies the DV RPU
+    // (profile 5 is a bare `format=pix_fmts=yuv420p`, tonemapping requested or
+    // not), so a server transcode returns IPTPQc2 samples reinterpreted as
+    // YCbCr — the green/purple result that sent this down the transcode path
+    // in the first place. The client decodes profile 5 in a user shader
+    // instead (see DolbyVisionShader).
+    test(
+      'Given a Dolby Vision profile 5 source, When supportsDirectLink is evaluated, Then it still direct plays',
+      () {
+        final stream = VideoStream(
+          mediaGuid: 'media-guid',
+          title: 'Main Video',
+          guid: 'video-guid',
+          resolutionType: '4k',
+          colorRangeType: 'DolbyVision',
+          codecName: 'hevc',
+          codecType: 'video',
+          colorRange: 'tv',
+          profile: 'main10',
+          index: 0,
+          width: 3840,
+          height: 2160,
+          codedWidth: 3840,
+          codedHeight: 2160,
+          displayAspectRatio: '16:9',
+          pixFmt: 'yuv420p10le',
+          level: '5.1',
+          colorSpace: 'bt2020nc',
+          colorTransfer: 'smpte2084',
+          colorPrimaries: 'bt2020',
+          duration: 7200,
+          dvProfile: 5,
+          refs: 1,
+          rFrameRate: '24/1',
+          avgFrameRate: '24/1',
+          bitsPerRawSample: '10',
+          bps: 24000000,
+          progressive: 1,
+          bitDepth: 10,
+          wrapper: 'mkv',
+          createTime: 0,
+          updateTime: 0,
+          rotation: 0,
+          ext1: 0,
+          isBluray: false,
+        );
+        final qualities = <QualityResponse>[
+          QualityResponse(bitrate: 24000000, resolution: '4k'),
+        ];
+
+        expect(
+          coordinator.supportsDirectLink(stream, qualities.first, qualities),
+          isTrue,
         );
       },
     );

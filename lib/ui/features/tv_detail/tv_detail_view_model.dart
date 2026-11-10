@@ -63,18 +63,18 @@ class TvDetailState {
 @riverpod
 class TvDetailNotifier extends _$TvDetailNotifier {
   Future<ItemResponse> _fetchItem() async {
-    final remote = ref.read(mediaRemoteDataSourceProvider);
+    final remote = ref.read(mediaBackendProvider);
     return (await remote.getItemDetail(guid)).getOrThrow();
   }
 
   Future<PlayInfoResponse?> _fetchPlayInfo() async {
-    final remote = ref.read(mediaRemoteDataSourceProvider);
+    final remote = ref.read(mediaBackendProvider);
     final result = await remote.getPlayInfo(ItemGuidRequest(itemGuid: guid));
     return result.dataOrNull;
   }
 
   Future<List<SeasonListResponse>> _fetchSeasonList() async {
-    final remote = ref.read(mediaRemoteDataSourceProvider);
+    final remote = ref.read(mediaBackendProvider);
     final result = await remote.getSeasonList(guid);
     return result.dataOrNull ?? const <SeasonListResponse>[];
   }
@@ -102,7 +102,7 @@ class TvDetailNotifier extends _$TvDetailNotifier {
 
   @override
   FutureOr<TvDetailState> build(String guid) async {
-    final remote = ref.read(mediaRemoteDataSourceProvider);
+    final remote = ref.read(mediaBackendProvider);
     // Watch so tag requests (and their labels) reload when the UI language changes.
     ref.watch(settingsProvider.select((s) => s.language));
     final tagRepo = ref.read(iTagRepositoryProvider);
@@ -146,7 +146,7 @@ class TvDetailNotifier extends _$TvDetailNotifier {
   }
 
   Future<void> refresh() async {
-    ref.read(mediaRemoteDataSourceProvider).invalidateDetailCache(guid);
+    ref.read(mediaBackendProvider).invalidateDetailCache(guid);
     ref.invalidateSelf();
     await future;
   }
@@ -159,7 +159,7 @@ class TvDetailNotifier extends _$TvDetailNotifier {
     }
 
     try {
-      final remote = ref.read(mediaRemoteDataSourceProvider);
+      final remote = ref.read(mediaBackendProvider);
       final isFavorite = item.isFavorite == 1;
       final response = await remote.toggleFavorite(
         ItemGuidRequest(itemGuid: guid),
@@ -192,7 +192,7 @@ class TvDetailNotifier extends _$TvDetailNotifier {
     }
 
     try {
-      final remote = ref.read(mediaRemoteDataSourceProvider);
+      final remote = ref.read(mediaBackendProvider);
       final isWatched = item.isWatched == 1;
       final response = await remote.toggleWatched(
         ItemGuidRequest(itemGuid: guid),
@@ -221,7 +221,7 @@ class TvDetailNotifier extends _$TvDetailNotifier {
       String seasonGuid, bool currentWatchedState) async {
     final l10n = lookupAppLocalizations(AppLanguage.localeFromValue(ref.read(settingsProvider).language));
     try {
-      final remote = ref.read(mediaRemoteDataSourceProvider);
+      final remote = ref.read(mediaBackendProvider);
       final response = await remote.toggleWatched(
         ItemGuidRequest(itemGuid: seasonGuid),
         isWatched: currentWatchedState,

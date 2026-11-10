@@ -7,7 +7,8 @@ import 'package:go_router/go_router.dart';
 import '../../data/models/movie_detail_models.dart';
 import '../../l10n/generated/app_localizations.dart';
 import '../../providers/providers.dart';
-import '../shared/common/scroll_row.dart';
+import 'common/fn_cached_image.dart';
+import 'common/scroll_row.dart';
 
 class CastScrollRow extends StatelessWidget {
   final String? title;
@@ -254,10 +255,5 @@ class _PersonPlaceholder extends StatelessWidget {
   }
 }
 
-String _buildImageUrl(String baseUrl, String path) {
-  if (baseUrl.isEmpty || path.isEmpty) return '';
-  final normalizedBaseUrl = baseUrl.endsWith('/')
-      ? baseUrl.substring(0, baseUrl.length - 1)
-      : baseUrl;
-  return '$normalizedBaseUrl/v/api/v1/sys/img$path';
-}
+String _buildImageUrl(String baseUrl, String path) =>
+    resolveMediaImageUrl(baseUrl, path);

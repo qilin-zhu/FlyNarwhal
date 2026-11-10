@@ -25,6 +25,7 @@ import '../../../core/network/access_code_session.dart';
 import '../../../core/network/dio_client.dart';
 import '../../../core/network/ssl/ssl_error_detector.dart';
 import '../../../core/utils/log/app_talker.dart';
+import '../../../data/backends/media_server_kind.dart';
 import '../../../data/models/login_history.dart';
 import '../../../data/storage/preferences_manager.dart';
 import '../../../l10n/generated/app_localizations.dart';
@@ -57,6 +58,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _passwordFocusNode = FocusNode();
 
   bool _isHttps = false;
+  MediaServerKind _serverKind = MediaServerKind.fnos;
   bool _accessCodeDialogVisible = false;
   bool _rememberPassword = false;
   bool _isNasLogin = false;
@@ -153,6 +155,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _isHttps = item.isHttps;
       _rememberPassword = hasRememberedPassword;
       _isNasLogin = item.isNasLogin;
+      _serverKind = item.serverKind;
       _fnIdController.text = item.fnId;
       _displayHost = _hostController.text;
       _displayPort = displayPort;
@@ -171,7 +174,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   void _onLogin() async {
     final host = _hostController.text;
-    final port = int.tryParse(_portController.text) ?? 5666;
+    // The port fallback differs per server family: fnOS listens on 5666, Emby
+    // on 8096. An empty box means "use the default for this kind".
+    final port = int.tryParse(_portController.text) ??
+        (_serverKind.isEmbyFamily ? 8096 : 5666);
     final username = _usernameController.text;
     final password = _passwordController.text;
     final fnId = _fnIdController.text;
@@ -179,6 +185,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       'Login',
       'start: isNasLogin=$_isNasLogin host="$host" port=$port fnId="$fnId" isHttps=$_isHttps',
     );
+
+    if (_serverKind.isEmbyFamily) {
+      await _loginEmby(host: host, port: port, username: username, password: password);
+      return;
+    }
 
     if (_isNasLogin) {
       _displayHost = fnId.trim();
@@ -249,6 +260,107 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (mounted) context.go('/home');
     } catch (e) {
       AppTalker.warning('Login', 'direct login error: $e');
+      _handleLoginError(e);
+    }
+  }
+
+  /// Server-family picker. Hidden entries are not "disabled" but absent: the
+  /// fnOS-only toggles (FN Connect relay, access code) are meaningless for
+  /// Emby and are hidden further down when an Emby kind is selected.
+  Widget _buildServerKindSelector() {
+    Widget chip(MediaServerKind kind, String label) {
+      final selected = _serverKind == kind;
+      return _withClickCursor(
+        GestureDetector(
+          key: ValueKey('login-server-kind-${kind.value}'),
+          onTap: () => setState(() {
+            final previous = _serverKind;
+            _serverKind = kind;
+            _autoLoginFromHistory = false;
+            // Retarget the port only while it still holds the other family's
+            // default, so a hand-edited port is never overwritten.
+            final port = _portController.text.trim();
+            if (kind.isEmbyFamily && previous.isFnos && port == '5666') {
+              _portController.text = '8096';
+            } else if (kind.isFnos &&
+                previous.isEmbyFamily &&
+                port == '8096') {
+              _portController.text = '5666';
+            }
+          }),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: selected
+                  ? _primaryBlue.withValues(alpha: 0.24)
+                  : Colors.white.withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(9),
+              border: Border.all(
+                color: selected ? _primaryBlue : Colors.transparent,
+              ),
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                color: selected ? _textColor : _hintColor,
+                fontSize: 13,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        chip(MediaServerKind.fnos, '飞牛影视'),
+        const SizedBox(width: 8),
+        chip(MediaServerKind.emby, 'Emby'),
+        const SizedBox(width: 8),
+        chip(MediaServerKind.jellyfin, 'Jellyfin'),
+      ],
+    );
+  }
+
+  /// Signs in to an Emby/Jellyfin server.
+  ///
+  /// The Emby contract has no FN Connect relay, no access-code gateway and no
+  /// port-5666 default, so this path skips every fnOS-specific step.
+  Future<void> _loginEmby({
+    required String host,
+    required int port,
+    required String username,
+    required String password,
+  }) async {
+    final l10n = AppLocalizations.of(context);
+    if (host.trim().isEmpty) {
+      _showToast(l10n.loginHostRequiredMessage);
+      return;
+    }
+    if (username.trim().isEmpty) {
+      _showToast(l10n.loginUsernameRequiredMessage);
+      return;
+    }
+    // Emby allows accounts without a password (and the public demo server is
+    // one of them), so an empty box is submitted as-is instead of rejected.
+    try {
+      _displayHost = host.trim();
+      _displayPort = port;
+      await ref.read(loginViewModelProvider.notifier).loginEmby(
+            host: host.trim(),
+            port: port,
+            username: username.trim(),
+            password: password,
+            isHttps: _isHttps,
+            rememberPassword: _rememberPassword,
+            displayHost: _displayHost,
+            displayPort: _displayPort,
+          );
+      if (mounted) context.go('/home');
+    } catch (e) {
+      AppTalker.warning('Login', 'emby login error: $e');
       _handleLoginError(e);
     }
   }
@@ -879,7 +991,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 style:
                                     TextStyle(color: _hintColor, fontSize: 16)),
                           ),
-                          const SizedBox(height: 28),
+                          const SizedBox(height: 20),
+                          _buildServerKindSelector(),
+                          const SizedBox(height: 16),
                           if (_isNasLogin)
                             KeyedSubtree(
                               key: const ValueKey('login-history-button'),
@@ -991,6 +1105,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             ),
                           ],
                           const SizedBox(height: 6),
+                          // FN Connect relay is fnOS-only: an Emby server has
+                          // no 5ddd.com relay to route through.
+                          if (_serverKind.isFnos)
                           Row(
                             children: [
                               Expanded(
@@ -1049,7 +1166,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                           size: 22, strokeWidth: 2),
                                     )
                                   : Text(
-                                      _isNasLogin
+                                      _isNasLogin && _serverKind.isFnos
                                           ? AppLocalizations.of(context)
                                               .loginNext
                                           : AppLocalizations.of(context)

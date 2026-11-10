@@ -10,6 +10,7 @@ import '../../../../data/models/episode_list_response.dart';
 import '../../../../domain/entities/media_type.dart';
 import '../../../../l10n/generated/app_localizations.dart';
 import '../../../shared/common/episode_view_mode_toggle.dart';
+import '../../../shared/common/fn_cached_image.dart';
 import '../../../shared/common/media_poster_placeholder.dart';
 
 const Color _episodeFlyoutBackgroundColor = Color(0xCC000000);
@@ -573,11 +574,8 @@ class _EpisodeListRowState extends State<_EpisodeListRow> {
     if (widget.baseUrl.isEmpty || posterPath == null || posterPath.isEmpty) {
       return null;
     }
-    final normalizedBaseUrl = widget.baseUrl.endsWith('/')
-        ? widget.baseUrl.substring(0, widget.baseUrl.length - 1)
-        : widget.baseUrl;
-    final suffix = posterPath.contains('?') ? '' : '?w=320';
-    return '$normalizedBaseUrl/v/api/v1/sys/img$posterPath$suffix';
+    final url = resolveMediaImageUrl(widget.baseUrl, posterPath, width: 320);
+    return url.isEmpty ? null : url;
   }
 
   String _buildTitle(AppLocalizations l10n) {

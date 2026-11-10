@@ -1,9 +1,8 @@
 import 'dart:collection';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../core/network/api_result.dart';
 import '../../../core/network/dio_client.dart';
-import '../../../core/constants/app_constants.dart';
-import '../../models/base_response.dart';
 import '../../models/episode_list_response.dart';
 import '../../models/home_models.dart';
 import '../../models/media_request_models.dart';
@@ -11,6 +10,7 @@ import '../../models/movie_detail_models.dart';
 import '../../models/person_models.dart';
 import '../../models/player_models.dart';
 import '../../models/season_list_response.dart';
+import '../../backends/media_response_parser.dart';
 
 /// 内存 LRU 缓存，附带 TTL 过期，用于 guid 详情类请求（getItemDetail/getStreamList 等）。
 class _DetailCache {
@@ -67,7 +67,7 @@ class MediaRemoteDataSource {
   Future<ApiResult<List<MediaDbListResponse>>> getMediaDbList() async {
     final result = await _dioClient.get<List<MediaDbListResponse>>(
       ApiEndpoints.mediaDbList,
-      converter: (data) => _parseMediaDbListResponse(data),
+      converter: (data) => MediaResponseParser.parseMediaDbListResponse(data),
     );
     return result;
   }
@@ -76,7 +76,7 @@ class MediaRemoteDataSource {
   Future<ApiResult<Map<String, int>>> getMediaSum() async {
     final result = await _dioClient.get<Map<String, int>>(
       ApiEndpoints.mediaDbSum,
-      converter: (data) => _parseMediaSumResponse(data),
+      converter: (data) => MediaResponseParser.parseMediaSumResponse(data),
     );
     return result;
   }
@@ -85,7 +85,7 @@ class MediaRemoteDataSource {
   Future<ApiResult<List<PlayDetailResponse>>> getPlayList() async {
     final result = await _dioClient.get<List<PlayDetailResponse>>(
       ApiEndpoints.playList,
-      converter: (data) => _parsePlayListResponse(data),
+      converter: (data) => MediaResponseParser.parsePlayListResponse(data),
     );
     return result;
   }
@@ -97,7 +97,7 @@ class MediaRemoteDataSource {
     final result = await _dioClient.post<ItemListQueryResponse>(
       ApiEndpoints.itemList,
       data: request.toJson(),
-      converter: (data) => _parseItemListResponse(data),
+      converter: (data) => MediaResponseParser.parseItemListResponse(data),
     );
     return result;
   }
@@ -109,7 +109,7 @@ class MediaRemoteDataSource {
     final result = await _dioClient.post<ItemListQueryResponse>(
       ApiEndpoints.favoriteList,
       data: request.toJson(),
-      converter: (data) => _parseItemListResponse(data),
+      converter: (data) => MediaResponseParser.parseItemListResponse(data),
     );
     return result;
   }
@@ -121,7 +121,7 @@ class MediaRemoteDataSource {
     if (cached is ApiResult<ItemResponse>) return cached;
     final result = await _dioClient.get<ItemResponse>(
       ApiEndpoints.itemByGuid(guid),
-      converter: (data) => _parseItemDetailResponse(data),
+      converter: (data) => MediaResponseParser.parseItemDetailResponse(data),
     );
     if (result.isSuccess) _cache.set(key, result);
     return result;
@@ -134,7 +134,7 @@ class MediaRemoteDataSource {
     if (cached is ApiResult<StreamListResponse?>) return cached;
     final result = await _dioClient.get<StreamListResponse?>(
       ApiEndpoints.streamListByGuid(guid),
-      converter: (data) => _parseOptionalStreamListResponse(data),
+      converter: (data) => MediaResponseParser.parseOptionalStreamListResponse(data),
     );
     if (result.isSuccess) _cache.set(key, result);
     return result;
@@ -149,7 +149,7 @@ class MediaRemoteDataSource {
     return _dioClient.post<PlayInfoResponse?>(
       ApiEndpoints.playInfo,
       data: request.toJson(),
-      converter: (data) => _parseOptionalPlayInfoResponse(data),
+      converter: (data) => MediaResponseParser.parseOptionalPlayInfoResponse(data),
     );
   }
 
@@ -160,7 +160,7 @@ class MediaRemoteDataSource {
     final result = await _dioClient.post<PlayInfoResponse?>(
       ApiEndpoints.playInfo,
       data: request.toJson(),
-      converter: (data) => _parseOptionalPlayInfoResponse(data),
+      converter: (data) => MediaResponseParser.parseOptionalPlayInfoResponse(data),
     );
     return result;
   }
@@ -170,7 +170,7 @@ class MediaRemoteDataSource {
     final result = await _dioClient.post<StreamResponse>(
       ApiEndpoints.stream,
       data: request.toJson(),
-      converter: (data) => _parseStreamResponse(data),
+      converter: (data) => MediaResponseParser.parseStreamResponse(data),
     );
     return result;
   }
@@ -180,7 +180,7 @@ class MediaRemoteDataSource {
     final result = await _dioClient.post<PlayPlayResponse>(
       ApiEndpoints.playPlay,
       data: request.toJson(),
-      converter: (data) => _parsePlayPlayResponse(data),
+      converter: (data) => MediaResponseParser.parsePlayPlayResponse(data),
     );
     return result;
   }
@@ -198,7 +198,7 @@ class MediaRemoteDataSource {
     final result = await _dioClient.get<List<MediaItem>>(
       ApiEndpoints.searchList,
       queryParameters: {'q': query},
-      converter: (data) => _parseSearchResponse(data),
+      converter: (data) => MediaResponseParser.parseSearchResponse(data),
     );
     return result;
   }
@@ -210,7 +210,7 @@ class MediaRemoteDataSource {
     if (cached is ApiResult<PersonResponse>) return cached;
     final result = await _dioClient.get<PersonResponse>(
       ApiEndpoints.personByGuid(guid),
-      converter: (data) => _parsePersonResponse(data),
+      converter: (data) => MediaResponseParser.parsePersonResponse(data),
     );
     if (result.isSuccess) _cache.set(key, result);
     return result;
@@ -223,7 +223,7 @@ class MediaRemoteDataSource {
     final result = await _dioClient.post<List<PersonItemList>>(
       ApiEndpoints.personItemList,
       data: request.toJson(),
-      converter: (data) => _parsePersonItemListResponse(data),
+      converter: (data) => MediaResponseParser.parsePersonItemListResponse(data),
     );
     return result;
   }
@@ -236,7 +236,7 @@ class MediaRemoteDataSource {
     final result = await _dioClient.post<List<PersonList>>(
       ApiEndpoints.personListByGuid(guid),
       data: <String, dynamic>{},
-      converter: (data) => _parsePersonListResponse(data),
+      converter: (data) => MediaResponseParser.parsePersonListResponse(data),
     );
     if (result.isSuccess) _cache.set(key, result);
     return result;
@@ -249,7 +249,7 @@ class MediaRemoteDataSource {
     if (cached is ApiResult<List<SeasonListResponse>>) return cached;
     final result = await _dioClient.get<List<SeasonListResponse>>(
       ApiEndpoints.seasonListByGuid(guid),
-      converter: (data) => _parseSeasonListResponse(data),
+      converter: (data) => MediaResponseParser.parseSeasonListResponse(data),
     );
     if (result.isSuccess) _cache.set(key, result);
     return result;
@@ -263,7 +263,7 @@ class MediaRemoteDataSource {
     if (cached is ApiResult<List<EpisodeListResponse>>) return cached;
     final result = await _dioClient.get<List<EpisodeListResponse>>(
       ApiEndpoints.episodeListByGuid(guid),
-      converter: (data) => _parseEpisodeListResponse(data),
+      converter: (data) => MediaResponseParser.parseEpisodeListResponse(data),
     );
     if (result.isSuccess) _cache.set(key, result);
     return result;
@@ -276,7 +276,7 @@ class MediaRemoteDataSource {
     final result = await _dioClient.post<MediaTranscodeResponse>(
       ApiEndpoints.mediaP,
       data: request.toJson(),
-      converter: (data) => _parseMediaTranscodeResponse(data),
+      converter: (data) => MediaResponseParser.parseMediaTranscodeResponse(data),
     );
     return result;
   }
@@ -288,7 +288,7 @@ class MediaRemoteDataSource {
     final result = await _dioClient.post<MediaResetQualityResponse>(
       ApiEndpoints.mediaP,
       data: request.toJson(),
-      converter: (data) => _parseMediaResetQualityResponse(data),
+      converter: (data) => MediaResponseParser.parseMediaResetQualityResponse(data),
     );
     return result;
   }
@@ -300,7 +300,7 @@ class MediaRemoteDataSource {
     final result = await _dioClient.post<MediaResetQualityResponse>(
       ApiEndpoints.mediaP,
       data: request.toJson(),
-      converter: (data) => _parseMediaResetQualityResponse(data),
+      converter: (data) => MediaResponseParser.parseMediaResetQualityResponse(data),
     );
     return result;
   }
@@ -312,7 +312,7 @@ class MediaRemoteDataSource {
     final result = await _dioClient.post<MediaResetQualityResponse>(
       ApiEndpoints.mediaP,
       data: request.toJson(),
-      converter: (data) => _parseMediaResetQualityResponse(data),
+      converter: (data) => MediaResponseParser.parseMediaResetQualityResponse(data),
     );
     return result;
   }
@@ -323,7 +323,7 @@ class MediaRemoteDataSource {
     final result = await _dioClient.post<MediaResetQualityResponse>(
       ApiEndpoints.mediaP,
       data: request.toJson(),
-      converter: (data) => _parseMediaResetQualityResponse(data),
+      converter: (data) => MediaResponseParser.parseMediaResetQualityResponse(data),
     );
     return result;
   }
@@ -333,7 +333,7 @@ class MediaRemoteDataSource {
     final result = await _dioClient.post<bool>(
       ApiEndpoints.playRecord,
       data: request.toJson(),
-      converter: (data) => _parseSuccessResponse(data),
+      converter: (data) => MediaResponseParser.parseSuccessResponse(data),
     );
     return result;
   }
@@ -343,7 +343,7 @@ class MediaRemoteDataSource {
     final result = await _dioClient.delete<bool>(
       ApiEndpoints.playRecord,
       data: ItemGuidRequest(itemGuid: guid).toJson(),
-      converter: (data) => _parseSuccessResponse(data),
+      converter: (data) => MediaResponseParser.parseSuccessResponse(data),
     );
     return result;
   }
@@ -354,7 +354,7 @@ class MediaRemoteDataSource {
     final result = await _dioClient.post<bool>(
       ApiEndpoints.playRecord,
       data: request.toJson(),
-      converter: (data) => _parseSuccessResponse(data),
+      converter: (data) => MediaResponseParser.parseSuccessResponse(data),
     );
     return result;
   }
@@ -364,7 +364,7 @@ class MediaRemoteDataSource {
     final result = await _dioClient.post<bool>(
       ApiEndpoints.configSetByItem,
       data: request.toJson(),
-      converter: (data) => _parseSuccessResponse(data),
+      converter: (data) => MediaResponseParser.parseSuccessResponse(data),
     );
     return result;
   }
@@ -374,7 +374,7 @@ class MediaRemoteDataSource {
     final result = await _dioClient.put<bool>(
       ApiEndpoints.favorite,
       data: ItemGuidRequest(itemGuid: guid).toJson(),
-      converter: (data) => _parseSuccessResponse(data),
+      converter: (data) => MediaResponseParser.parseSuccessResponse(data),
     );
     return result;
   }
@@ -384,7 +384,7 @@ class MediaRemoteDataSource {
     final result = await _dioClient.delete<bool>(
       ApiEndpoints.favorite,
       data: ItemGuidRequest(itemGuid: guid).toJson(),
-      converter: (data) => _parseSuccessResponse(data),
+      converter: (data) => MediaResponseParser.parseSuccessResponse(data),
     );
     return result;
   }
@@ -394,7 +394,7 @@ class MediaRemoteDataSource {
     final result = await _dioClient.post<bool>(
       ApiEndpoints.watched,
       data: ItemGuidRequest(itemGuid: guid).toJson(),
-      converter: (data) => _parseSuccessResponse(data),
+      converter: (data) => MediaResponseParser.parseSuccessResponse(data),
     );
     return result;
   }
@@ -404,7 +404,7 @@ class MediaRemoteDataSource {
     final result = await _dioClient.delete<bool>(
       ApiEndpoints.watched,
       data: ItemGuidRequest(itemGuid: guid).toJson(),
-      converter: (data) => _parseSuccessResponse(data),
+      converter: (data) => MediaResponseParser.parseSuccessResponse(data),
     );
     return result;
   }
@@ -419,12 +419,12 @@ class MediaRemoteDataSource {
         ? await _dioClient.delete<bool>(
             ApiEndpoints.favorite,
             data: request.toJson(),
-            converter: (data) => _parseSuccessResponse(data),
+            converter: (data) => MediaResponseParser.parseSuccessResponse(data),
           )
         : await _dioClient.put<bool>(
             ApiEndpoints.favorite,
             data: request.toJson(),
-            converter: (data) => _parseSuccessResponse(data),
+            converter: (data) => MediaResponseParser.parseSuccessResponse(data),
           );
     if (result.isSuccess) _cache.invalidate(guid);
     return result;
@@ -440,12 +440,12 @@ class MediaRemoteDataSource {
         ? await _dioClient.delete<bool>(
             ApiEndpoints.watched,
             data: request.toJson(),
-            converter: (data) => _parseSuccessResponse(data),
+            converter: (data) => MediaResponseParser.parseSuccessResponse(data),
           )
         : await _dioClient.post<bool>(
             ApiEndpoints.watched,
             data: request.toJson(),
-            converter: (data) => _parseSuccessResponse(data),
+            converter: (data) => MediaResponseParser.parseSuccessResponse(data),
           );
     if (result.isSuccess) _cache.invalidate(guid);
     return result;
@@ -470,7 +470,7 @@ class MediaRemoteDataSource {
     final result = await _dioClient.post<bool>(
       ApiEndpoints.itemRefresh,
       data: ItemGuidRequest(itemGuid: itemGuid).toJson(),
-      converter: (data) => _parseSuccessResponse(data),
+      converter: (data) => MediaResponseParser.parseSuccessResponse(data),
     );
     if (result.isSuccess) _cache.invalidate(itemGuid);
     return result;
@@ -485,7 +485,7 @@ class MediaRemoteDataSource {
         'item_guid': itemGuid,
         'type': type,
       },
-      converter: (data) => _parseSuccessResponse(data),
+      converter: (data) => MediaResponseParser.parseSuccessResponse(data),
     );
     if (result.isSuccess) _cache.invalidate(itemGuid);
     return result;
@@ -503,309 +503,9 @@ class MediaRemoteDataSource {
     final result = await _dioClient.delete<bool>(
       ApiEndpoints.itemByGuid(guid),
       data: <String, dynamic>{'delete_file': deleteFile ? 1 : 0},
-      converter: (data) => _parseSuccessResponse(data),
+      converter: (data) => MediaResponseParser.parseSuccessResponse(data),
     );
     if (result.isSuccess) _cache.invalidate(guid);
     return result;
-  }
-
-  // Private parsing methods
-  List<MediaDbListResponse> _parseMediaDbListResponse(dynamic data) {
-    final baseResponse = FnBaseResponse<List<MediaDbListResponse>>.fromJson(
-      data,
-      (json) => (json as List)
-          .map((e) => MediaDbListResponse.fromJson(e as Map<String, dynamic>))
-          .toList(),
-    );
-    if (baseResponse.code != ResponseCodes.success) {
-      throw FailureInfo.fromResponse(
-        code: baseResponse.code,
-        msg: baseResponse.msg,
-      );
-    }
-    return baseResponse.data ?? [];
-  }
-
-  Map<String, int> _parseMediaSumResponse(dynamic data) {
-    final baseResponse = FnBaseResponse<Map<String, int>>.fromJson(
-      data,
-      (json) => (json as Map<String, dynamic>)
-          .map((key, value) => MapEntry(key, value as int)),
-    );
-    if (baseResponse.code != ResponseCodes.success) {
-      throw FailureInfo.fromResponse(
-        code: baseResponse.code,
-        msg: baseResponse.msg,
-      );
-    }
-    return baseResponse.data ?? {};
-  }
-
-  List<PlayDetailResponse> _parsePlayListResponse(dynamic data) {
-    final baseResponse = FnBaseResponse<List<PlayDetailResponse>>.fromJson(
-      data,
-      (json) => (json as List)
-          .map((e) => PlayDetailResponse.fromJson(e as Map<String, dynamic>))
-          .toList(),
-    );
-    if (baseResponse.code != ResponseCodes.success) {
-      throw FailureInfo.fromResponse(
-        code: baseResponse.code,
-        msg: baseResponse.msg,
-      );
-    }
-    return baseResponse.data ?? [];
-  }
-
-  ItemListQueryResponse _parseItemListResponse(dynamic data) {
-    final baseResponse = FnBaseResponse<ItemListQueryResponse>.fromJson(
-      data,
-      (json) => ItemListQueryResponse.fromJson(json as Map<String, dynamic>),
-    );
-    if (baseResponse.code != ResponseCodes.success) {
-      throw FailureInfo.fromResponse(
-        code: baseResponse.code,
-        msg: baseResponse.msg,
-      );
-    }
-    return baseResponse.data ?? ItemListQueryResponse();
-  }
-
-  ItemResponse _parseItemDetailResponse(dynamic data) {
-    try {
-      final baseResponse = FnBaseResponse<ItemResponse>.fromJson(
-        data,
-        (json) => ItemResponse.fromJson(json as Map<String, dynamic>),
-      );
-      if (baseResponse.code != ResponseCodes.success ||
-          baseResponse.data == null) {
-        throw Exception(
-          'Item detail response invalid: '
-          'code=${baseResponse.code}, msg=${baseResponse.msg}, '
-          '${_describeItemDetailData(data)}',
-        );
-      }
-      return baseResponse.data!;
-    } catch (e) {
-      throw Exception(
-        'Item detail parse failed: ${_describeItemDetailData(data)}; error=$e',
-      );
-    }
-  }
-
-  String _describeItemDetailData(dynamic data) {
-    final buffer = StringBuffer('type=${data.runtimeType}');
-    if (data is Map) {
-      final keys = data.keys.take(10).map((key) => key.toString()).join(', ');
-      buffer.write(', keys=[$keys]');
-      final payload = data['data'];
-      buffer.write(', dataType=${payload.runtimeType}');
-      if (payload is Map) {
-        final payloadKeys =
-            payload.keys.take(10).map((key) => key.toString()).join(', ');
-        buffer.write(', dataKeys=[$payloadKeys]');
-      }
-    }
-    return buffer.toString();
-  }
-
-  StreamListResponse? _parseOptionalStreamListResponse(dynamic data) {
-    final baseResponse = FnBaseResponse<StreamListResponse>.fromJson(
-      data,
-      (json) => StreamListResponse.fromJson(json as Map<String, dynamic>),
-    );
-    return baseResponse.data;
-  }
-
-  PlayInfoResponse? _parseOptionalPlayInfoResponse(dynamic data) {
-    final baseResponse = FnBaseResponse<PlayInfoResponse>.fromJson(
-      data,
-      (json) => PlayInfoResponse.fromJson(json as Map<String, dynamic>),
-    );
-    return baseResponse.data;
-  }
-
-  StreamResponse _parseStreamResponse(dynamic data) {
-    final baseResponse = FnBaseResponse<StreamResponse>.fromJson(
-      data,
-      (json) => StreamResponse.fromJson(json as Map<String, dynamic>),
-    );
-    if (baseResponse.code != ResponseCodes.success ||
-        baseResponse.data == null) {
-      throw FailureInfo.fromResponse(
-        code: baseResponse.code,
-        msg: baseResponse.msg,
-      );
-    }
-    return baseResponse.data!;
-  }
-
-  PlayPlayResponse _parsePlayPlayResponse(dynamic data) {
-    final baseResponse = FnBaseResponse<PlayPlayResponse>.fromJson(
-      data,
-      (json) => PlayPlayResponse.fromJson(json as Map<String, dynamic>),
-    );
-    if (baseResponse.code != ResponseCodes.success ||
-        baseResponse.data == null) {
-      // Keep the business code in the message: callers (e.g. the player's
-      // direct-link fallback) match on it, and the server may return an
-      // empty msg which would otherwise produce an unreadable exception.
-      final detail = 'code=${baseResponse.code} msg=${baseResponse.msg}';
-      throw FailureInfo(
-        message: detail,
-        code: baseResponse.code,
-        displayMessage: detail,
-      );
-    }
-    return baseResponse.data!;
-  }
-
-  List<MediaItem> _parseSearchResponse(dynamic data) {
-    final baseResponse = FnBaseResponse<List<MediaItem>>.fromJson(
-      data,
-      (json) => ((json as List<dynamic>?) ?? const <dynamic>[])
-          .map((e) => MediaItem.fromJson(e as Map<String, dynamic>))
-          .toList(),
-    );
-    if (baseResponse.code != ResponseCodes.success) {
-      throw FailureInfo.fromResponse(
-        code: baseResponse.code,
-        msg: baseResponse.msg,
-      );
-    }
-    return baseResponse.data ?? const <MediaItem>[];
-  }
-
-  PersonResponse _parsePersonResponse(dynamic data) {
-    final baseResponse = FnBaseResponse<PersonResponse>.fromJson(
-      data,
-      (json) => PersonResponse.fromJson(json as Map<String, dynamic>),
-    );
-    if (baseResponse.code != ResponseCodes.success) {
-      // Keep the business code so callers can tell "person record missing"
-      // (rendered as an empty state) apart from real failures.
-      throw FailureInfo.fromResponse(
-        code: baseResponse.code,
-        msg: baseResponse.msg,
-      );
-    }
-    if (baseResponse.data == null) {
-      throw FailureInfo.fromResponse(
-        code: baseResponse.code,
-        msg: baseResponse.msg,
-      );
-    }
-    return baseResponse.data!;
-  }
-
-  List<PersonItemList> _parsePersonItemListResponse(dynamic data) {
-    final baseResponse = FnBaseResponse<PersonItemListQueryResponse>.fromJson(
-      data,
-      (json) => PersonItemListQueryResponse.fromJson(
-          json as Map<String, dynamic>),
-    );
-    if (baseResponse.code != ResponseCodes.success) {
-      throw FailureInfo.fromResponse(
-        code: baseResponse.code,
-        msg: baseResponse.msg,
-      );
-    }
-    return baseResponse.data?.list ?? const <PersonItemList>[];
-  }
-
-  List<PersonList> _parsePersonListResponse(dynamic data) {
-    final baseResponse = FnBaseResponse<PersonListResponse>.fromJson(
-      data,
-      (json) => PersonListResponse.fromJson(json as Map<String, dynamic>),
-    );
-    if (baseResponse.code != ResponseCodes.success) {
-      throw FailureInfo.fromResponse(
-        code: baseResponse.code,
-        msg: baseResponse.msg,
-      );
-    }
-    return baseResponse.data?.list ?? [];
-  }
-
-  List<SeasonListResponse> _parseSeasonListResponse(dynamic data) {
-    final baseResponse = FnBaseResponse<List<SeasonListResponse>>.fromJson(
-      data,
-      (json) => ((json as List<dynamic>?) ?? const <dynamic>[])
-          .map((e) => SeasonListResponse.fromJson(e as Map<String, dynamic>))
-          .toList(),
-    );
-    if (baseResponse.code != ResponseCodes.success) {
-      throw FailureInfo.fromResponse(
-        code: baseResponse.code,
-        msg: baseResponse.msg,
-      );
-    }
-    return baseResponse.data ?? const <SeasonListResponse>[];
-  }
-
-  List<EpisodeListResponse> _parseEpisodeListResponse(dynamic data) {
-    if (data is List) {
-      return data
-          .map((e) => EpisodeListResponse.fromJson(e as Map<String, dynamic>))
-          .toList();
-    }
-
-    final baseResponse = FnBaseResponse<List<EpisodeListResponse>>.fromJson(
-      data,
-      (json) => ((json as List<dynamic>?) ?? const <dynamic>[])
-          .map((e) => EpisodeListResponse.fromJson(e as Map<String, dynamic>))
-          .toList(),
-    );
-    if (baseResponse.code != ResponseCodes.success) {
-      throw FailureInfo.fromResponse(
-        code: baseResponse.code,
-        msg: baseResponse.msg,
-      );
-    }
-    return baseResponse.data ?? const <EpisodeListResponse>[];
-  }
-
-  MediaTranscodeResponse _parseMediaTranscodeResponse(dynamic data) {
-    final baseResponse = FnBaseResponse<MediaTranscodeResponse>.fromJson(
-      data,
-      (json) => MediaTranscodeResponse.fromJson(json as Map<String, dynamic>),
-    );
-    if (baseResponse.code != ResponseCodes.success ||
-        baseResponse.data == null) {
-      throw FailureInfo.fromResponse(
-        code: baseResponse.code,
-        msg: baseResponse.msg,
-      );
-    }
-    return baseResponse.data!;
-  }
-
-  MediaResetQualityResponse _parseMediaResetQualityResponse(dynamic data) {
-    final baseResponse = FnBaseResponse<MediaResetQualityResponse>.fromJson(
-      data,
-      (json) =>
-          MediaResetQualityResponse.fromJson(json as Map<String, dynamic>),
-    );
-    if (baseResponse.code != ResponseCodes.success ||
-        baseResponse.data == null) {
-      throw FailureInfo.fromResponse(
-        code: baseResponse.code,
-        msg: baseResponse.msg,
-      );
-    }
-    final response = baseResponse.data!;
-    if (!response.isSuccess) {
-      throw Exception(response.describeFailure('media/p'));
-    }
-    return response;
-  }
-
-  bool _parseSuccessResponse(dynamic data) {
-    if (data is bool) return data;
-    if (data is Map) {
-      if (data['code'] == ResponseCodes.success) return true;
-      if (data['success'] == true) return true;
-    }
-    return false;
   }
 }

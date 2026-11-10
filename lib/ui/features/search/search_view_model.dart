@@ -66,7 +66,7 @@ class SearchNotifier extends StateNotifier<SearchState> {
   Future<void> _runSearch(String query) async {
     final token = ++_requestToken;
     try {
-      final remote = _ref.read(mediaRemoteDataSourceProvider);
+      final remote = _ref.read(mediaBackendProvider);
       final result = await remote.search(query.trim());
       // Drop stale responses
       if (token != _requestToken) return;

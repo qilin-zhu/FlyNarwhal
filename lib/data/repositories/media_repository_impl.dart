@@ -1,30 +1,30 @@
 import '../../core/network/api_result.dart';
 import '../../domain/entities/index.dart';
 import '../../domain/repositories/i_media_repository.dart';
-import '../datasources/remote/media_remote_data_source.dart';
+import '../backends/media_backend.dart';
 import '../mappers/media_mapper.dart';
 import '../models/home_models.dart';
 
 /// Implementation of IMediaRepository
 class MediaRepositoryImpl implements IMediaRepository {
-  final MediaRemoteDataSource _remoteDataSource;
+  final MediaBackend _backend;
 
-  MediaRepositoryImpl(this._remoteDataSource);
+  MediaRepositoryImpl(this._backend);
 
   @override
   Future<ApiResult<List<MediaLibraryEntity>>> getMediaDbList() async {
-    final result = await _remoteDataSource.getMediaDbList();
+    final result = await _backend.getMediaDbList();
     return result.map((data) => MediaMapper.toLibraryEntityList(data));
   }
 
   @override
   Future<ApiResult<Map<String, int>>> getMediaSum() async {
-    return _remoteDataSource.getMediaSum();
+    return _backend.getMediaSum();
   }
 
   @override
   Future<ApiResult<List<PlayDetailEntity>>> getPlayList() async {
-    final result = await _remoteDataSource.getPlayList();
+    final result = await _backend.getPlayList();
     return result.map((data) => MediaMapper.toPlayDetailEntityList(data));
   }
 
@@ -50,7 +50,7 @@ class MediaRepositoryImpl implements IMediaRepository {
       sortColumn: params.sortColumn,
     );
 
-    final result = await _remoteDataSource.getItemList(request);
+    final result = await _backend.getItemList(request);
     return result.map((data) => MediaMapper.toItemListEntity(data));
   }
 
@@ -60,8 +60,8 @@ class MediaRepositoryImpl implements IMediaRepository {
     bool currentFavoriteState,
   ) async {
     final result = currentFavoriteState
-        ? await _remoteDataSource.removeFavorite(guid)
-        : await _remoteDataSource.addFavorite(guid);
+        ? await _backend.removeFavorite(guid)
+        : await _backend.addFavorite(guid);
 
     return result.map((success) => ActionResult(
       guid: guid,
@@ -77,8 +77,8 @@ class MediaRepositoryImpl implements IMediaRepository {
     bool currentWatchedState,
   ) async {
     final result = currentWatchedState
-        ? await _remoteDataSource.markUnwatched(guid)
-        : await _remoteDataSource.markWatched(guid);
+        ? await _backend.markUnwatched(guid)
+        : await _backend.markWatched(guid);
 
     return result.map((success) => ActionResult(
       guid: guid,
