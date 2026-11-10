@@ -1,0 +1,61 @@
+name: Build Windows Preview
+
+# Manual, unsigned Windows build for trying the app out (for example to
+# evaluate a feature branch) without the release secrets that
+# `Build Desktop Releases` requires.
+#
+# This is deliberately not a release pipeline: no obfuscation, no private
+# obfuscator checkout, no minisign, artifacts stay inside the run and are never
+# published, so nothing here can be mistaken for a signed release.
+#
+# x64 only. The release workflow hand-installs a pinned SDK on windows-11-arm
+# because subosito/flutter-action cannot resolve a Windows arm64 stable build;
+# reuse that step from build-desktop.yml if an arm64 preview is ever needed.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Enable Windows desktop
+        shell: pwsh
+        run: flutter config --enable-windows-desktop
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build preview bundle and installer
+        shell: pwsh
+        run: |
+          # The script owns the tool checks, the bundle contract verification
+          # and the ISCC invocation, so this workflow stays thin.
+          ./scripts/windows/build_preview.ps1 -Architecture x64
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-preview
+          path: build/installer/FlyNarwhal_Setup_Windows_*.exe
+          if-no-files-found: error
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-preview-logs
+          path: build/windows/
+          if-no-files-found: ignore
