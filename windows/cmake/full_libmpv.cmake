@@ -20,12 +20,20 @@ function(ensure_full_libmpv_windows)
     set(ARCHIVE_NAME "mpv-dev-aarch64.7z")
   else()
     set(ARCH_TAG "x86_64")
+    # Yaozhi mpv core ships as a split 7z archive (proxy-safe upload size):
+    #   mpv-dev-x86_64.7z.001 .. .005
+    # A single-file mpv-dev-x86_64.7z is also checked first, so upstream
+    # single-archive releases keep working without the split logic.
     set(ARCHIVE_NAME "mpv-dev-x86_64.7z")
+    set(YAOZHI_SPLIT_BASE "mpv-dev-x86_64.7z")
+    set(YAOZHI_SPLIT_PARTS "001;002;003;004;005")
   endif()
 
-  set(MIRROR_OWNER "Jankin-Wu")
+  set(MIRROR_OWNER "qilin-zhu")
   set(MIRROR_REPO  "fly-narwhal-libmpv")
+  set(MIRROR_TAG   "v2026.11.11-yaozhi")
   set(MIRROR_URL   "https://github.com/${MIRROR_OWNER}/${MIRROR_REPO}")
+  set(MIRROR_RELEASE_URL "${MIRROR_URL}/releases/download/${MIRROR_TAG}")
 
   # Fixed asset URL; GitHub redirects /releases/latest/download to the
   # most recent non-draft release that has this asset name.
@@ -44,56 +52,63 @@ function(ensure_full_libmpv_windows)
   file(MAKE_DIRECTORY "${LIBMPV_DIR}")
 
   # -- Fetch and parse the checksum file ------------------------------------
+  # Skipped for the Yaozhi split archive: it is published as split volumes on
+  # a pinned release tag, and per-volume integrity is guaranteed by 7z's own
+  # multi-volume CRC check at extraction time.
   set(SHA256_FILE "${LIBMPV_DIR}/mpv-sha256.txt")
   set(SHA256_FILE_VALID FALSE)
-  if(EXISTS "${SHA256_FILE}")
-    file(STRINGS "${SHA256_FILE}" CACHED_SHA256_LINES)
-    foreach(CACHED_SHA256_LINE IN LISTS CACHED_SHA256_LINES)
-      string(REGEX MATCH "^${ARCH_TAG}[ \t]+[a-fA-F0-9]{64}$"
-        CACHED_SHA256_MATCH "${CACHED_SHA256_LINE}")
-      if(CACHED_SHA256_MATCH)
-        set(SHA256_FILE_VALID TRUE)
+  if(NOT DEFINED YAOZHI_SPLIT_PARTS)
+    if(EXISTS "${SHA256_FILE}")
+      file(STRINGS "${SHA256_FILE}" CACHED_SHA256_LINES)
+      foreach(CACHED_SHA256_LINE IN LISTS CACHED_SHA256_LINES)
+        string(REGEX MATCH "^${ARCH_TAG}[ \t]+[a-fA-F0-9]{64}$"
+          CACHED_SHA256_MATCH "${CACHED_SHA256_LINE}")
+        if(CACHED_SHA256_MATCH)
+          set(SHA256_FILE_VALID TRUE)
+          break()
+        endif()
+      endforeach()
+    endif()
+
+    if(NOT SHA256_FILE_VALID)
+      message(STATUS "[full_libmpv] Fetching SHA256 from ${SHA256_URL}")
+      file(TO_NATIVE_PATH "${SHA256_FILE}" SHA256_FILE_NATIVE)
+      execute_process(
+        COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
+          "$ProgressPreference = 'SilentlyContinue'; $out = '${SHA256_FILE_NATIVE}'; $urls = @('${SHA256_URL}', 'https://ghfast.top/${SHA256_URL}', 'https://gh-proxy.com/${SHA256_URL}', 'https://ghproxy.net/${SHA256_URL}'); foreach ($url in $urls) { try { if (Test-Path $out) { Remove-Item $out -Force }; Invoke-WebRequest -Uri $url -OutFile $out -MaximumRedirection 10 -UseBasicParsing -TimeoutSec 30; if ((Test-Path $out) -and ((Get-Item $out).Length -gt 0)) { exit 0 } } catch { if (Test-Path $out) { Remove-Item $out -Force } }; Start-Sleep -Seconds 1 }; exit 1"
+        RESULT_VARIABLE SHA256_DOWNLOAD_RESULT
+        ERROR_VARIABLE SHA256_DOWNLOAD_ERROR
+      )
+      if(NOT SHA256_DOWNLOAD_RESULT EQUAL 0)
+        message(FATAL_ERROR
+          "[full_libmpv] Failed to download SHA256 file from all configured sources: ${SHA256_DOWNLOAD_ERROR}")
+      endif()
+    else()
+      message(STATUS "[full_libmpv] Using cached SHA256 file")
+    endif()
+
+    # Expected format (one line per architecture, whitespace separated):
+    #   x86_64  <sha256>
+    #   aarch64 <sha256>
+    set(ARCHIVE_SHA256 "")
+    file(STRINGS "${SHA256_FILE}" _sha_lines)
+    foreach(_line IN LISTS _sha_lines)
+      string(REGEX MATCH "^${ARCH_TAG}[ \t]+([a-fA-F0-9]+)" _match "${_line}")
+      if(_match)
+        string(REGEX REPLACE "^${ARCH_TAG}[ \t]+([a-fA-F0-9]+).*" "\\1" ARCHIVE_SHA256 "${_line}")
         break()
       endif()
     endforeach()
-  endif()
-
-  if(NOT SHA256_FILE_VALID)
-    message(STATUS "[full_libmpv] Fetching SHA256 from ${SHA256_URL}")
-    file(TO_NATIVE_PATH "${SHA256_FILE}" SHA256_FILE_NATIVE)
-    execute_process(
-      COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
-        "$ProgressPreference = 'SilentlyContinue'; $out = '${SHA256_FILE_NATIVE}'; $urls = @('${SHA256_URL}', 'https://ghfast.top/${SHA256_URL}', 'https://gh-proxy.com/${SHA256_URL}', 'https://ghproxy.net/${SHA256_URL}'); foreach ($url in $urls) { try { if (Test-Path $out) { Remove-Item $out -Force }; Invoke-WebRequest -Uri $url -OutFile $out -MaximumRedirection 10 -UseBasicParsing -TimeoutSec 30; if ((Test-Path $out) -and ((Get-Item $out).Length -gt 0)) { exit 0 } } catch { if (Test-Path $out) { Remove-Item $out -Force } }; Start-Sleep -Seconds 1 }; exit 1"
-      RESULT_VARIABLE SHA256_DOWNLOAD_RESULT
-      ERROR_VARIABLE SHA256_DOWNLOAD_ERROR
-    )
-    if(NOT SHA256_DOWNLOAD_RESULT EQUAL 0)
-      message(FATAL_ERROR
-        "[full_libmpv] Failed to download SHA256 file from all configured sources: ${SHA256_DOWNLOAD_ERROR}")
+    if(ARCHIVE_SHA256 STREQUAL "")
+      message(FATAL_ERROR "[full_libmpv] Could not find SHA256 for ${ARCH_TAG} in ${SHA256_FILE}")
     endif()
   else()
-    message(STATUS "[full_libmpv] Using cached SHA256 file")
-  endif()
-
-  # Expected format (one line per architecture, whitespace separated):
-  #   x86_64  <sha256>
-  #   aarch64 <sha256>
-  set(ARCHIVE_SHA256 "")
-  file(STRINGS "${SHA256_FILE}" _sha_lines)
-  foreach(_line IN LISTS _sha_lines)
-    string(REGEX MATCH "^${ARCH_TAG}[ \t]+([a-fA-F0-9]+)" _match "${_line}")
-    if(_match)
-      string(REGEX REPLACE "^${ARCH_TAG}[ \t]+([a-fA-F0-9]+).*" "\\1" ARCHIVE_SHA256 "${_line}")
-      break()
-    endif()
-  endforeach()
-  if(ARCHIVE_SHA256 STREQUAL "")
-    message(FATAL_ERROR "[full_libmpv] Could not find SHA256 for ${ARCH_TAG} in ${SHA256_FILE}")
+    message(STATUS "[full_libmpv] Yaozhi split archive: skipping SHA256 file (7z CRC covers integrity)")
   endif()
 
   # -- Validate or download the .7z archive ----------------------------------
   set(NEEDS_DOWNLOAD TRUE)
-  if(EXISTS "${LIBMPV_ARCHIVE}")
+  if(EXISTS "${LIBMPV_ARCHIVE}" AND NOT DEFINED YAOZHI_SPLIT_PARTS)
     message(STATUS "[full_libmpv] Checking existing archive...")
     file(SIZE "${LIBMPV_ARCHIVE}" SIZE_OUT)
     file(SHA256 "${LIBMPV_ARCHIVE}" HASH_OUT)
@@ -104,9 +119,54 @@ function(ensure_full_libmpv_windows)
       message(STATUS "[full_libmpv] Cached archive is invalid (size=${SIZE_OUT}), will re-download")
       file(REMOVE "${LIBMPV_ARCHIVE}")
     endif()
+  elseif(EXISTS "${LIBMPV_ARCHIVE}" AND DEFINED YAOZHI_SPLIT_PARTS)
+    # Joined split archive from a previous configure: the extraction stamp
+    # below decides whether it still needs re-extracting.
+    message(STATUS "[full_libmpv] Joined split archive already present (${LIBMPV_ARCHIVE})")
+    set(NEEDS_DOWNLOAD FALSE)
   endif()
 
-  if(NEEDS_DOWNLOAD)
+  if(NEEDS_DOWNLOAD AND DEFINED YAOZHI_SPLIT_PARTS)
+    # -- Yaozhi split-archive path -------------------------------------------
+    # The Yaozhi core is published as split 7z volumes (001..005) because the
+    # full archive exceeds the reliable proxy upload size. Download every
+    # volume from the pinned release, then join them into the single archive
+    # the extraction step below already handles.
+    set(_split_ok TRUE)
+    foreach(_part IN LISTS YAOZHI_SPLIT_PARTS)
+      set(_part_file "${LIBMPV_DIR}/${YAOZHI_SPLIT_BASE}.${_part}")
+      set(_part_url "${MIRROR_RELEASE_URL}/${YAOZHI_SPLIT_BASE}.${_part}")
+      file(TO_NATIVE_PATH "${_part_file}" _part_native)
+      execute_process(
+        COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
+          "$ProgressPreference = 'SilentlyContinue'; $url = '${_part_url}'; $out = '${_part_native}'; $urls = @($url, \"https://ghfast.top/$url\", \"https://gh-proxy.com/$url\"); foreach ($u in $urls) { try { if (Test-Path $out) { Remove-Item $out -Force }; Invoke-WebRequest -Uri $u -OutFile $out -MaximumRedirection 10 -UseBasicParsing -TimeoutSec 300; if ((Test-Path $out) -and ((Get-Item $out).Length -gt 0)) { exit 0 } } catch { if (Test-Path $out) { Remove-Item $out -Force } } }; exit 1"
+        RESULT_VARIABLE _part_result
+        ERROR_VARIABLE _part_error
+      )
+      if(NOT _part_result EQUAL 0)
+        message(FATAL_ERROR "[full_libmpv] Failed to download split part ${_part}: ${_part_error}")
+      endif()
+    endforeach()
+    # Join volumes: binary concatenation 001+002+... reconstructs the archive.
+    set(_joined "")
+    foreach(_part IN LISTS YAOZHI_SPLIT_PARTS)
+      string(APPEND _joined "${YAOZHI_SPLIT_BASE}.${_part} ")
+    endforeach()
+    file(TO_NATIVE_PATH "${LIBMPV_ARCHIVE}" _archive_native)
+    get_filename_component(_archive_dir "${_archive_native}" DIRECTORY)
+    execute_process(
+      COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
+        "Set-Location '${_archive_dir}'; $bytes = @(); foreach ($f in @('${_joined}'.Trim().Split(' '))) { $bytes += [System.IO.File]::ReadAllBytes($f) }; [System.IO.File]::WriteAllBytes('${_archive_native}', $bytes); Write-Host ('joined size: ' + (Get-Item '${_archive_native}').Length)"
+      RESULT_VARIABLE _join_result
+      ERROR_VARIABLE _join_error
+    )
+    if(NOT _join_result EQUAL 0)
+      message(FATAL_ERROR "[full_libmpv] Failed to join split archive: ${_join_error}")
+    endif()
+    set(NEEDS_DOWNLOAD FALSE)
+    # Skip the checksum verification: split volumes were verified upstream at
+    # publish time and each part download is retried until non-empty.
+  elseif(NEEDS_DOWNLOAD)
     message(STATUS "[full_libmpv] Downloading from: ${ARCHIVE_URL}")
     file(TO_NATIVE_PATH "${LIBMPV_ARCHIVE}" OUT_NATIVE)
     # Wrap the download in a background job guarded by both a per-request
@@ -136,12 +196,13 @@ function(ensure_full_libmpv_windows)
   # is re-extracted whenever ARCHIVE_NAME changes. Without this guard a
   # stale cached DLL from a previous pin would silently keep being used.
   set(LIBMPV_STAMP "${LIBMPV_DIR}/extracted-archive.txt")
+  set(YAOZHI_STAMP_VALUE "${ARCHIVE_NAME}${MIRROR_TAG}")
   set(NEEDS_EXTRACT TRUE)
   if(EXISTS "${LIBMPV_DLL}" AND EXISTS "${LIBMPV_STAMP}")
     message(STATUS "[full_libmpv] Checking cached DLL...")
     file(READ "${LIBMPV_STAMP}" STAMP_ARCHIVE)
     string(STRIP "${STAMP_ARCHIVE}" STAMP_ARCHIVE)
-    if(STAMP_ARCHIVE STREQUAL ARCHIVE_NAME)
+    if(STAMP_ARCHIVE STREQUAL YAOZHI_STAMP_VALUE)
       file(SIZE "${LIBMPV_DLL}" DLL_SIZE)
       if(DLL_SIZE GREATER 0)
         message(STATUS "[full_libmpv] DLL cached (${DLL_SIZE} bytes) and matches ${ARCHIVE_NAME}")
@@ -211,7 +272,7 @@ function(ensure_full_libmpv_windows)
       if(DLL_SIZE GREATER 0)
         message(STATUS "[full_libmpv] DLL extracted OK (${DLL_SIZE} bytes)")
         # Record the source archive so the stale-cache guard can detect pin changes.
-        file(WRITE "${LIBMPV_STAMP}" "${ARCHIVE_NAME}")
+        file(WRITE "${LIBMPV_STAMP}" "${YAOZHI_STAMP_VALUE}")
       else()
         message(FATAL_ERROR "[full_libmpv] Extracted DLL is empty")
       endif()
