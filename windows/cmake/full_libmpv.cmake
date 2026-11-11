@@ -108,7 +108,7 @@ function(ensure_full_libmpv_windows)
 
   # -- Validate or download the .7z archive ----------------------------------
   set(NEEDS_DOWNLOAD TRUE)
-  if(EXISTS "${LIBMPV_ARCHIVE}" AND NOT DEFINED YAOZHI_SPLIT_PARTS)
+  if(NOT DEFINED YAOZHI_SPLIT_PARTS AND EXISTS "${LIBMPV_ARCHIVE}")
     message(STATUS "[full_libmpv] Checking existing archive...")
     file(SIZE "${LIBMPV_ARCHIVE}" SIZE_OUT)
     file(SHA256 "${LIBMPV_ARCHIVE}" HASH_OUT)
@@ -119,19 +119,14 @@ function(ensure_full_libmpv_windows)
       message(STATUS "[full_libmpv] Cached archive is invalid (size=${SIZE_OUT}), will re-download")
       file(REMOVE "${LIBMPV_ARCHIVE}")
     endif()
-  elseif(EXISTS "${LIBMPV_ARCHIVE}" AND DEFINED YAOZHI_SPLIT_PARTS)
-    # Joined split archive from a previous configure: the extraction stamp
-    # below decides whether it still needs re-extracting.
-    message(STATUS "[full_libmpv] Joined split archive already present (${LIBMPV_ARCHIVE})")
-    set(NEEDS_DOWNLOAD FALSE)
   endif()
 
   if(NEEDS_DOWNLOAD AND DEFINED YAOZHI_SPLIT_PARTS)
     # -- Yaozhi split-archive path -------------------------------------------
     # The Yaozhi core is published as split 7z volumes (001..005) because the
     # full archive exceeds the reliable proxy upload size. Download every
-    # volume from the pinned release, then join them into the single archive
-    # the extraction step below already handles.
+    # volume from the pinned release; 7-Zip then extracts from the .001 volume
+    # directly (it reads the sibling volumes automatically).
     set(_split_ok TRUE)
     foreach(_part IN LISTS YAOZHI_SPLIT_PARTS)
       set(_part_file "${LIBMPV_DIR}/${YAOZHI_SPLIT_BASE}.${_part}")
@@ -146,23 +141,15 @@ function(ensure_full_libmpv_windows)
       if(NOT _part_result EQUAL 0)
         message(FATAL_ERROR "[full_libmpv] Failed to download split part ${_part}: ${_part_error}")
       endif()
+      # Fail fast on a silently-truncated volume instead of a confusing 7z
+      # error later.
+      set(_part_file "${LIBMPV_DIR}/${YAOZHI_SPLIT_BASE}.${_part}")
+      file(SIZE "${_part_file}" _part_size)
+      if(_part_size EQUAL 0)
+        message(FATAL_ERROR "[full_libmpv] Split part ${_part} downloaded 0 bytes")
+      endif()
+      message(STATUS "[full_libmpv] Part ${_part}: ${_part_size} bytes")
     endforeach()
-    # Join volumes: binary concatenation 001+002+... reconstructs the archive.
-    set(_joined "")
-    foreach(_part IN LISTS YAOZHI_SPLIT_PARTS)
-      string(APPEND _joined "${YAOZHI_SPLIT_BASE}.${_part} ")
-    endforeach()
-    file(TO_NATIVE_PATH "${LIBMPV_ARCHIVE}" _archive_native)
-    get_filename_component(_archive_dir "${_archive_native}" DIRECTORY)
-    execute_process(
-      COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
-        "Set-Location '${_archive_dir}'; $bytes = @(); foreach ($f in @('${_joined}'.Trim().Split(' '))) { $bytes += [System.IO.File]::ReadAllBytes($f) }; [System.IO.File]::WriteAllBytes('${_archive_native}', $bytes); Write-Host ('joined size: ' + (Get-Item '${_archive_native}').Length)"
-      RESULT_VARIABLE _join_result
-      ERROR_VARIABLE _join_error
-    )
-    if(NOT _join_result EQUAL 0)
-      message(FATAL_ERROR "[full_libmpv] Failed to join split archive: ${_join_error}")
-    endif()
     set(NEEDS_DOWNLOAD FALSE)
     # Skip the checksum verification: split volumes were verified upstream at
     # publish time and each part download is retried until non-empty.
@@ -197,6 +184,10 @@ function(ensure_full_libmpv_windows)
   # stale cached DLL from a previous pin would silently keep being used.
   set(LIBMPV_STAMP "${LIBMPV_DIR}/extracted-archive.txt")
   set(YAOZHI_STAMP_VALUE "${ARCHIVE_NAME}${MIRROR_TAG}")
+  if(DEFINED YAOZHI_SPLIT_PARTS)
+    # Extraction reads the first split volume; pin the stamp to it.
+    set(YAOZHI_STAMP_VALUE "${YAOZHI_SPLIT_BASE}.001${MIRROR_TAG}")
+  endif()
   set(NEEDS_EXTRACT TRUE)
   if(EXISTS "${LIBMPV_DLL}" AND EXISTS "${LIBMPV_STAMP}")
     message(STATUS "[full_libmpv] Checking cached DLL...")
@@ -216,6 +207,20 @@ function(ensure_full_libmpv_windows)
   endif()
 
   if(NEEDS_EXTRACT)
+    # Split archives: 7-Zip opens the .001 volume and automatically reads the
+    # following volumes from the same directory.
+    set(EXTRACT_SOURCE "${LIBMPV_ARCHIVE}")
+    if(DEFINED YAOZHI_SPLIT_PARTS)
+      set(EXTRACT_SOURCE "${LIBMPV_DIR}/${YAOZHI_SPLIT_BASE}.001")
+      if(NOT EXISTS "${EXTRACT_SOURCE}")
+        message(FATAL_ERROR "[full_libmpv] Split first volume missing: ${EXTRACT_SOURCE}")
+      endif()
+      file(SIZE "${EXTRACT_SOURCE}" _first_size)
+      if(_first_size EQUAL 0)
+        message(FATAL_ERROR "[full_libmpv] Split first volume is empty: ${EXTRACT_SOURCE}")
+      endif()
+    endif()
+
     # Locate a 7z capable extractor
     find_program(SEVENZ_EXE NAMES 7z 7za 7zr)
     if(NOT SEVENZ_EXE)
@@ -252,8 +257,8 @@ function(ensure_full_libmpv_windows)
       message(STATUS "[full_libmpv] Using 7z: ${SEVENZ_EXE}")
     endif()
 
-    message(STATUS "[full_libmpv] Extracting libmpv-2.dll (~118 MB)...")
-    file(TO_NATIVE_PATH "${LIBMPV_ARCHIVE}" SRC_NATIVE)
+    message(STATUS "[full_libmpv] Extracting libmpv-2.dll (~136 MB)...")
+    file(TO_NATIVE_PATH "${EXTRACT_SOURCE}" SRC_NATIVE)
     file(TO_NATIVE_PATH "${LIBMPV_DIR}"     DST_NATIVE)
 
     execute_process(
