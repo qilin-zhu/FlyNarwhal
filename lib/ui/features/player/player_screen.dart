@@ -4974,7 +4974,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              Icons.movie_creation_outlined,
+              FluentIcons.video,
               size: 48,
               color: Colors.white.withOpacity(0.7),
             ),

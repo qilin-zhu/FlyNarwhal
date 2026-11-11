@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+import 'dart:io'
+    show File, FileMode, Platform, Process, ProcessStartMode, RandomAccessFile, sleep;
 import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
@@ -27,11 +28,7 @@ import 'package:flutter/foundation.dart';
 /// — a blocking read on the UI isolate would stall the whole app waiting for
 /// a reply that may never come.
 class YaoplayerSession {
-  YaoplayerSession._({
-    required this.process,
-    required this._isolateHandle,
-    required this._toIsolate,
-  });
+  YaoplayerSession._(this.process, this._isolateHandle, this._toIsolate);
 
   /// Absolute path of the bundled launcher, or null when the bundle does not
   /// carry the runtime (non-Windows or arm64 builds).
@@ -101,11 +98,7 @@ class YaoplayerSession {
       ),
       debugName: 'yaoplayer-ipc',
     );
-    return YaoplayerSession._(
-      process: process,
-      isolateHandle: isolate,
-      toIsolate: toIsolate,
-    );
+    return YaoplayerSession._(process, isolate, toIsolate);
   }
 
   final Process process;
@@ -225,7 +218,9 @@ void _pipeIsolateMain(_PipeIsolateConfig config) {
       // alone cannot read the replies back.
       pipe = File(config.pipePath).openSync(mode: FileMode.append);
     } catch (_) {
-      Isolate.current.sleep(const Duration(milliseconds: 200));
+      // No Isolate.sleep in this SDK version; a busy retry at 200ms via a
+      // blocking OS-level sleep keeps the pipe poll cheap.
+      sleep(const Duration(milliseconds: 200));
     }
   }
   if (pipe == null) {
@@ -250,7 +245,7 @@ void _pipeIsolateMain(_PipeIsolateConfig config) {
       if (chunk.isNotEmpty) {
         byteBuf.addAll(chunk);
       } else {
-        Isolate.current.sleep(const Duration(milliseconds: 50));
+        sleep(const Duration(milliseconds: 50));
       }
     }
   }
