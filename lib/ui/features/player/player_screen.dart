@@ -51,6 +51,7 @@ import 'services/skip_segment_resolver.dart';
 import 'services/direct_link_audio_track_resolver.dart';
 import 'services/direct_link_subtitle_track_resolver.dart';
 import 'services/dolby_vision_shader.dart';
+import 'services/yaoplayer_session.dart';
 import 'services/hls_subtitle_repository.dart';
 import 'services/player_device_context_service.dart';
 import 'services/play_record_request_builder.dart';
@@ -156,6 +157,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     releaseConsumers: _releaseHwdecProbe,
   );
   VideoController? _videoController;
+  // External Yaoplayer session for Dolby Vision profile 5 direct-link
+  // playback (see yaoplayer_session.dart for why media_kit cannot do DV).
+  // When set, the embedded media_kit surface stays idle and the UI shows the
+  // handoff overlay instead of the video view.
+  YaoplayerSession? _yaoplayerSession;
+  bool _yaoplayerActive = false;
   bool _isInitialized = false;
   bool _isLoading = true;
   bool _isPlaying = false;
@@ -3723,6 +3730,62 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     );
   }
 
+  /// Launches the bundled Yaoplayer for the current DV profile 5 stream and
+  /// opens its IPC channel. Returns false when the runtime is unavailable so
+  /// the caller can fall back to the embedded player.
+  Future<bool> _startYaoplayerSession({
+    required PlayerSessionLoadResult result,
+    required int startPositionMs,
+  }) async {
+    try {
+      await _stopYaoplayerSession();
+      final headers = _buildPlaybackHttpHeaders(
+        result.preparedPlaySource.playUri,
+      );
+      final title = result.playingInfoCache.item?.title;
+      final session = await YaoplayerSession.start(
+        url: result.preparedPlaySource.playUri,
+        headers: headers,
+        startSeconds: startPositionMs > 0 ? startPositionMs ~/ 1000 : 0,
+        title: title,
+      );
+      if (session == null) return false;
+      _yaoplayerSession = session;
+      return true;
+    } catch (e) {
+      AppTalker.warning('Player', 'yaoplayer session start failed: $e');
+      return false;
+    }
+  }
+
+  /// Feeds server progress reporting from Yaoplayer's IPC clock. The
+  /// embedded-player timer reads media_kit's state; without this the Yaoplayer
+  /// session would never update the watch position on the server.
+  void _startYaoplayerProgressReporting() {
+    _playRecordTimer?.cancel();
+    _playRecordTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
+      final session = _yaoplayerSession;
+      if (session == null || !mounted) return;
+      final seconds = await session.positionSeconds();
+      if (seconds == null) return;
+      if (mounted) {
+        setState(() => _currentPosition = seconds * 1000);
+      }
+      _queuePlayRecordUpdate(positionMs: seconds * 1000);
+    });
+  }
+
+  Future<void> _stopYaoplayerSession() async {
+    final session = _yaoplayerSession;
+    _yaoplayerSession = null;
+    _yaoplayerActive = false;
+    if (session != null) {
+      try {
+        await session.stop();
+      } catch (_) {}
+    }
+  }
+
   Future<void> _loadAndPlayMedia() async {
     final requestToken = ++_loadRequestToken;
     final isCurrent = _capturePlaybackOperation();
@@ -3795,6 +3858,37 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
       final startMs =
           widget.initialPositionMs ?? result.effectiveStartPositionMs;
+
+      // Dolby Vision profile 5 on a direct link: hand the stream to the
+      // bundled Yaoplayer, whose vo=gpu-next applies the DV colour mapping
+      // media_kit's vo=libmpv render path cannot reach. Everything else
+      // keeps using the embedded player.
+      final isYaoplayerSession = result.playingInfoCache.isUseDirectLink &&
+          result.playingInfoCache.currentVideoStream?.dvProfile == 5;
+      if (isYaoplayerSession) {
+        final started = await _startYaoplayerSession(
+          result: result,
+          startPositionMs: startMs,
+        );
+        if (!isCurrent()) {
+          return;
+        }
+        if (started) {
+          setState(() {
+            _isLoading = false;
+            _isInitialized = true;
+            _yaoplayerActive = true;
+          });
+          _startYaoplayerProgressReporting();
+          return;
+        }
+        // Yaoplayer unavailable (not bundled / launch failed): fall through
+        // to the embedded path, where the IPT shader still handles colour.
+        AppTalker.warning(
+          'Player',
+          'yaoplayer session unavailable, falling back to embedded player',
+        );
+      }
 
       if (result.playingInfoCache.isUseDirectLink) {
         source = await _openDirectLinkWithHlsFallback(
@@ -4872,6 +4966,38 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   }
 
   Widget _buildVideoView() {
+    // A Yaoplayer session owns the picture in its own window; the embedded
+    // surface stays black and a handoff note explains where playback is.
+    if (_yaoplayerActive) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.movie_creation_outlined,
+              size: 48,
+              color: Colors.white.withOpacity(0.7),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '杜比视界已在 Yaoplayer 窗口中播放',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.85),
+                fontSize: 15,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '关闭 Yaoplayer 窗口或返回本页可结束播放',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.55),
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     final controller = _videoController!;
     final ratio = _isPipMode ? null : _videoFillModeRatio;
     if (ratio == null) {
@@ -6081,6 +6207,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   @override
   void dispose() {
     unawaited(_closePlaybackSource());
+    unawaited(_stopYaoplayerSession());
     if (_isDesktopPlatform()) {
       windowManager.removeListener(this);
       unawaited(_windowAspectRatioController.release());

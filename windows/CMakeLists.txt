@@ -108,6 +108,8 @@ endfunction()
 
 # Full libmpv download module (for PGS/HDMV bitmap subtitle support)
 include(cmake/full_libmpv.cmake)
+# Yaoplayer runtime download module (external-player Dolby Vision playback)
+include(cmake/yaoplayer_runtime.cmake)
 
 # Normalize Windows plugin links before including generated plugin rules.
 if (WIN32)
@@ -119,6 +121,12 @@ if (WIN32)
   # The extracted DLL overrides media_kit's stripped build during install.
   # -------------------------------------------------------------------------
   ensure_full_libmpv_windows()
+
+  # -------------------------------------------------------------------------
+  # Download & stage the minimal Yaoplayer runtime for external-player
+  # Dolby Vision profile 5 playback (x64 only; Yaoplayer ships no arm64 core).
+  # -------------------------------------------------------------------------
+  ensure_yaoplayer_runtime_windows()
 
   # media_kit_libs_windows_video is overridden locally and downloads its own
   # arm64 archives, so the x86_64 helper pre-downloads are only useful on x64.
@@ -293,6 +301,15 @@ endif()
 install(FILES "${FULL_LIBMPV_DLL}"
   DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
+
+# Bundle the Yaoplayer runtime under yaoplayer/ for external-player Dolby
+# Vision profile 5 playback (x64 only; the function exports an empty value
+# elsewhere so this install() needs a guard).
+if(YAOPLAYER_RUNTIME_DIR)
+  install(DIRECTORY "${YAOPLAYER_RUNTIME_DIR}"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}"
+    COMPONENT Runtime)
+endif()
 
 # Copy the native assets provided by the build.dart from all packages.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/windows/")
